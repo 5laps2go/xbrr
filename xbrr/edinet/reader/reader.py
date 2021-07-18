@@ -125,19 +125,6 @@ class Reader(BaseReader):
         if self.taxonomy and path.startswith(self.taxonomy.prefix):
             path = path.replace(self.taxonomy.prefix, "")
             path = os.path.join(self.taxonomy_path, path)
-            if not os.path.exists(path):
-                _path = Path(path)
-                xbrl_date = _path.parent.name
-                # check namespace directory
-                taxonomy_date = ""
-                if _path.parent.parent.exists():
-                    for d in _path.parent.parent.iterdir():
-                        if d.is_dir():
-                            taxonomy_date = d.name
-                            break
-
-                if taxonomy_date and taxonomy_date != xbrl_date:
-                    path = path.replace(xbrl_date, taxonomy_date)
             if os.path.isdir(path):
                 _path = Path(path)
                 xbrl_date = _path.name

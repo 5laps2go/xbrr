@@ -62,7 +62,7 @@ class TestReader(unittest.TestCase):
         self.assertEqual(len(roles), 10)
 
     def test_read_by_link(self):
-        taxonomy_element = self.reader.read_by_link("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-03-31/jpcrp_cor_2018-03-31.xsd#jpcrp_cor_AnnexedDetailedScheduleOfProvisionsTextBlock")
+        taxonomy_element = self.reader.read_by_link("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd#jpcrp_cor_AnnexedDetailedScheduleOfProvisionsTextBlock")
         local_element = self.reader.read_by_link("jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26.xsd#jpcrp030000-asr_E00436-000_ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsHeading")
         self.assertTrue(taxonomy_element)
         self.assertEqual(taxonomy_element.label(), "引当金明細表")
