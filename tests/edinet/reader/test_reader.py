@@ -3,6 +3,8 @@ import shutil
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
+import pandas as pd
+from pandas.util.testing import assert_frame_equal
 
 
 class TestReader(unittest.TestCase):
@@ -71,8 +73,13 @@ class TestReader(unittest.TestCase):
 
     def test_read_schema_by_role(self):
         bs = self.reader.read_schema_by_role("http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet")
+        bs=bs.astype({'parent_5_order':int,'order':float}) # FIXME: the last record should have str instead of int64(float64) as that of the rest.
         self.assertGreater(len(bs), 0)
+        expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DDYF-bs.csv"),index_col=0,dtype=bs.dtypes.apply(lambda x: {'object':str,'int64':int,'float64':float}[x.name]).to_dict(),keep_default_na=False)
+        assert_frame_equal(bs, expected_df)
 
     def test_read_value_by_role(self):
         pl = self.reader.read_value_by_role("http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_StatementOfIncome")
         self.assertGreater(len(pl), 0)
+        expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DDYF-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
+        assert_frame_equal(pl, expected_df)
