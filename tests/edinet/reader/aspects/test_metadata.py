@@ -2,6 +2,7 @@ import os
 import unittest
 from xbrr.edinet.reader.reader import Reader
 from xbrr.edinet.reader.aspects.metadata import Metadata
+import tests.edinet.reader.doc as testdoc
 
 
 class TestMetadata(unittest.TestCase):
@@ -9,7 +10,7 @@ class TestMetadata(unittest.TestCase):
     def get_xbrl(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path))
 
         return xbrl
 

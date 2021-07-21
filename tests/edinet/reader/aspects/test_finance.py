@@ -3,6 +3,8 @@ import shutil
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
+from xbrr.edinet.reader.doc import Doc
+import tests.edinet.reader.doc as testdoc
 from xbrr.edinet.reader.aspects.finance import Finance
 
 
@@ -12,20 +14,22 @@ class TestFinance(unittest.TestCase):
     def setUpClass(cls):
         _dir = os.path.join(os.path.dirname(__file__), "../../data")
         client = DocumentClient()
-        file_path = client.get_xbrl("S100G6IU", save_dir=_dir,
+        root_dir = client.get_xbrl("S100G6IU", save_dir=_dir,
                                     expand_level="dir")
-        cls.reader = Reader(file_path)
+        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
+        cls.reader = Reader(xbrl_doc, save_dir=_dir)
+        cls._dir = _dir
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.reader.xbrl_dir.root)
+        shutil.rmtree(cls.reader.xbrl_doc.root_dir)
         if os.path.exists(cls.reader.taxonomy.root):
             shutil.rmtree(cls.reader.taxonomy.root)
 
     def get_xbrl(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
         return xbrl
 
     def test_voluntary_accounting_policy_change(self):
@@ -61,6 +65,6 @@ class TestFinance(unittest.TestCase):
 
     def test_pl_ifrs(self):
         pl = self.reader.extract(Finance).pl(ifrs=True)
-        pl.to_csv("pl_ifrs.csv", index=False, encoding="shift_jis")
+        # pl.to_csv("pl_ifrs.csv", index=False, encoding="shift_jis")
         self.assertTrue(pl is not None)
         self.assertGreater(len(pl), 0)

@@ -7,7 +7,7 @@ from joblib import Parallel, delayed
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 from xbrr.base.reader.base_reader import BaseReader
-from xbrr.edinet.reader.directory import Directory
+from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.taxonomy import Taxonomy
 from xbrr.edinet.reader.element import Element
 from xbrr.edinet.reader.element_schema import ElementSchema
@@ -15,33 +15,17 @@ from xbrr.edinet.reader.element_schema import ElementSchema
 
 class Reader(BaseReader):
 
-    def __init__(self, xbrl_dir_or_file="", taxonomy=None):
+    def __init__(self, xbrl_doc: Doc, taxonomy=None, save_dir: str = ""):
         super().__init__("edinet")
-        self.__xbrl_dir_or_file = xbrl_dir_or_file
+        self.__xbrl_doc = xbrl_doc
+        self.xbrl_doc = xbrl_doc
+        self.save_dir = save_dir
         self._cache = {}
-
-        if os.path.isdir(xbrl_dir_or_file):
-            self.xbrl_dir = Directory(xbrl_dir_or_file)
-            self.xbrl_file = self.xbrl_dir._find_file("xbrl", as_xml=False)
-        elif os.path.isfile(xbrl_dir_or_file):
-            self.xbrl_file = xbrl_dir_or_file
-            self.xbrl_dir = None
-        else:
-            raise Exception(
-                f"File or directory {xbrl_dir_or_file} does not Exsit.")
 
         if isinstance(taxonomy, Taxonomy):
             self.taxonomy = taxonomy
         else:
-            if self.xbrl_dir:
-                root = Path(self.xbrl_dir.root).parent
-            else:
-                root = Path(self.xbrl_file).parent
-
-            if root.name == "raw":
-                # Cookiecutter data science structure
-                root = root.parent
-            root = root.joinpath("external")
+            root = Path(self.save_dir).joinpath("external")
             self.taxonomy = Taxonomy(root)
         self.taxonomy_year = ""
         self.__set_taxonomy_year()
@@ -51,7 +35,7 @@ class Reader(BaseReader):
         return self
 
     def __reduce_ex__(self, proto):
-        return type(self), (self.__xbrl_dir_or_file, self.taxonomy)
+        return type(self), (self.__xbrl_doc, self.taxonomy)
 
     def __set_taxonomy_year(self):
         self.taxonomy_year = ""
@@ -101,10 +85,10 @@ class Reader(BaseReader):
 
     @property
     def xbrl(self):
-        if self.xbrl_dir:
-            path = self.xbrl_dir._find_file("xbrl", as_xml=False)
+        if self.xbrl_doc.has_schema:
+            path = self.xbrl_doc._find_file("xbrl", as_xml=False)
         else:
-            path = self.xbrl_file
+            path = self.xbrl_doc.xbrl_file
         return self._read_from_cache(path)
 
     def _read_from_cache(self, path):
@@ -131,10 +115,10 @@ class Reader(BaseReader):
                 # element should exist if name does not exist.
                 namespace = "_".join(element.split("_")[:-1])
                 path = _path.joinpath(f"{namespace}_{xbrl_date}.xsd")
-        elif self.xbrl_dir:
-            path = self.xbrl_dir._find_file("xsd", as_xml=False)
+        elif self.xbrl_doc.has_schema:
+            path = self.xbrl_doc._find_file("xsd", as_xml=False)
         else:
-            path = os.path.dirname(self.xbrl_file)
+            path = os.path.dirname(self.xbrl_doc.xbrl_file)
 
         return path
 
@@ -160,9 +144,9 @@ class Reader(BaseReader):
 
     def has_role_in_link(self, role_link, link_type):
         if link_type == "presentation":
-            doc = self.xbrl_dir.pre
+            doc = self.xbrl_doc.pre
         elif link_type == "calculation":
-            doc = self.xbrl_dir.cal
+            doc = self.xbrl_doc.cal
         else:
             return False
 
@@ -174,18 +158,18 @@ class Reader(BaseReader):
 
     def read_schema_by_role(self, role_link, link_type="presentation",
                             label_kind="", label_verbose=False):
-        if self.xbrl_dir is None:
+        if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
         doc = None
         link_node = ""
         arc_node = ""
         if link_type == "presentation":
-            doc = self.xbrl_dir.pre
+            doc = self.xbrl_doc.pre
             link_node = "link:presentationLink"
             arc_node = "link:presentationArc"
         elif link_type == "calculation":
-            doc = self.xbrl_dir.cal
+            doc = self.xbrl_doc.cal
             link_node = "link:calculationLink"
             arc_node = "link:calculationArc"
         else:

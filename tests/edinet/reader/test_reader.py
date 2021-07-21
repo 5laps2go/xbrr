@@ -3,8 +3,10 @@ import shutil
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
+from xbrr.edinet.reader.doc import Doc
+import tests.edinet.reader.doc as testdoc
 import pandas as pd
-from pandas.util.testing import assert_frame_equal
+from pandas.testing import assert_frame_equal
 
 
 class TestReader(unittest.TestCase):
@@ -13,27 +15,29 @@ class TestReader(unittest.TestCase):
     def setUpClass(cls):
         _dir = os.path.join(os.path.dirname(__file__), "../data")
         client = DocumentClient()
-        file_path = client.get_xbrl("S100DDYF", save_dir=_dir,
+        root_dir = client.get_xbrl("S100DDYF", save_dir=_dir,
                                     expand_level="dir")
-        cls.reader = Reader(file_path)
+        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
+        cls.reader = Reader(xbrl_doc, save_dir=_dir)
+        cls._dir = _dir
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.reader.xbrl_dir.root)
+        shutil.rmtree(cls.reader.xbrl_doc.root_dir)
         if os.path.exists(cls.reader.taxonomy.root):
             shutil.rmtree(cls.reader.taxonomy.root)
 
     def test_find(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path))
         element = xbrl.find("jpdei_cor:EDINETCodeDEI")
         self.assertEqual(element.text, "E05739")
 
     def test_to_html(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
         html = xbrl.find(tag).html
 
@@ -42,11 +46,11 @@ class TestReader(unittest.TestCase):
     def test_get_element(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
         value = xbrl.find("jpcrp_cor:NumberOfEmployees").value()
         print(value.to_dict())
         self.assertEqual(value.value, "19081")
-        self.assertEqual(value.decimals, "0")
+        self.assertEqual(value.decimals, "0") # TODO: label should be lazy loaded.
 
     def test_taxonomy_year(self):
         self.assertEqual(self.reader.taxonomy_year, "2018")

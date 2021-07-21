@@ -29,8 +29,8 @@ class APIFacade():
 
 class ReaderFacade():
 
-    def read(self, path):
-        return Reader(path)
+    def read(self, xbrl_doc):
+        return Reader(xbrl_doc)
 
 
 class AspectFacade():

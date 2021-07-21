@@ -4,6 +4,7 @@ import unittest
 from xbrr.edinet.reader.reader import Reader
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.edinet.reader.element import Element
+import tests.edinet.reader.doc as testdoc
 
 
 class TestBaseParser(unittest.TestCase):
@@ -11,7 +12,7 @@ class TestBaseParser(unittest.TestCase):
     def test_search_text(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        reader = Reader(path)
+        reader = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
         parser = BaseParser(reader, Element, {
             "test": tag
@@ -23,7 +24,7 @@ class TestBaseParser(unittest.TestCase):
     def test_extract_value(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        reader = Reader(path)
+        reader = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
         parser = BaseParser(reader, Element, {
             "test": tag

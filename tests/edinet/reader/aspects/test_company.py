@@ -3,6 +3,7 @@ import shutil
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
+from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.aspects.company import Company
 
 
@@ -12,13 +13,14 @@ class TestCompany(unittest.TestCase):
     def setUpClass(cls):
         _dir = os.path.join(os.path.dirname(__file__), "../../data")
         client = DocumentClient()
-        file_path = client.get_xbrl("S100G70J", save_dir=_dir,
+        root_dir = client.get_xbrl("S100G70J", save_dir=_dir,
                                     expand_level="dir")
-        cls.reader = Reader(file_path)
+        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
+        cls.reader = Reader(xbrl_doc, save_dir=_dir)
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.reader.xbrl_dir.root)
+        shutil.rmtree(os.path.join(cls.reader.save_dir, "S100G70J"))
         if os.path.exists(cls.reader.taxonomy.root):
             shutil.rmtree(cls.reader.taxonomy.root)
 

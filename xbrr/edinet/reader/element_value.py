@@ -44,7 +44,7 @@ class ElementValue(BaseElementValue):
             decimals = _element["decimals"]
 
         label = ""
-        if reader.xbrl_dir and label_kind is not None:
+        if reader.xbrl_doc.has_schema and label_kind is not None:
             label = reader\
                     .read_by_link(reference)\
                     .label(label_kind, label_verbose)

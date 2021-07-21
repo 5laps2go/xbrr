@@ -32,7 +32,7 @@ class ElementSchema(BaseElementSchema):
         period_type = ""
         balance = ""
 
-        if reader.xbrl_dir:
+        if reader.xbrl_doc.has_schema:
             _def = reader.read_by_link(reference)
             if label_kind is not None:
                 label = _def.label(label_kind, label_verbose)

@@ -3,6 +3,7 @@ import shutil
 import pyfbi
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
+from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.aspects.finance import Finance
 
 
@@ -14,8 +15,9 @@ def check():
     else:
         os.mkdir(_dir)
     client = DocumentClient()
-    file_path = client.get_xbrl("S100G2KL", save_dir=_dir, expand_level="dir")
-    reader = Reader(file_path)
+    xbrl_root = client.get_xbrl("S100G2KL", save_dir=_dir, expand_level="dir")
+    xbrl_doc = Doc(root_dir=xbrl_root, xbrl_kind="public")
+    reader = Reader(xbrl_doc)
     print("Start Calculation")
     bs = reader.extract(Finance).bs()
     bs.to_csv("bs.csv", index=False, encoding="shift_jis")

@@ -2,6 +2,7 @@ import os
 import unittest
 from xbrr.edinet.reader.reader import Reader
 from xbrr.edinet.reader.aspects.information import Information
+import tests.edinet.reader.doc as testdoc
 
 
 class TestInformation(unittest.TestCase):
@@ -9,7 +10,7 @@ class TestInformation(unittest.TestCase):
     def get_xbrl(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../../data/xbrl2019.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path))
         return xbrl
 
     def test_shareholders(self):

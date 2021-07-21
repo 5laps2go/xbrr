@@ -2,6 +2,7 @@ import os
 import unittest
 from xbrr.edinet.reader.reader import Reader
 from xbrr.edinet.reader.aspects.business import Business
+import tests.edinet.reader.doc as testdoc
 
 
 class TestBusiness(unittest.TestCase):
@@ -9,7 +10,7 @@ class TestBusiness(unittest.TestCase):
     def get_xbrl(self, year=2019):
         path = os.path.join(os.path.dirname(__file__),
                             f"../../data/xbrl{year}.xbrl")
-        xbrl = Reader(path)
+        xbrl = Reader(testdoc.Doc(path))
         return xbrl
 
     def test_policy_environment_issue_etc(self):

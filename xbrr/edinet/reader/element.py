@@ -57,6 +57,7 @@ class Element(BaseElement):
         xml = None
 
         if os.path.dirname(path).endswith("PublicDoc"):
+            # TODO: this is edinet specific label file finding, need tdnet label finding, and use label file convention not to search dir
             label_path = self._find_file(os.path.dirname(path), extention)
             href = self.reference
         else:
