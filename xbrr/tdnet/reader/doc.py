@@ -1,9 +1,8 @@
 import os
 import glob
-from xbrr.base.reader.base_doc import BaseDoc
-from bs4 import BeautifulSoup
+from xbrr.base.reader.xbrl_doc import XbrlDoc
 
-class Doc(BaseDoc):
+class Doc(XbrlDoc):
 
     def __init__(self, root_dir="", xbrl_kind=""):
 
@@ -15,10 +14,11 @@ class Doc(BaseDoc):
                     f"XBRL file does not exist.")
             return xbrl_files[0]
         
-        super().__init__("tdnet", root_dir=root_dir, xbrl_file=_xbrl_file(root_dir, xbrl_kind))
-        self.file_spec = os.path.splitext(self.xbrl_file)[0]
+        xbrl_file=_xbrl_file(root_dir, xbrl_kind)
+        self.file_spec = os.path.splitext(xbrl_file)[0]
+        super().__init__("tdnet", root_dir=root_dir, xbrl_file=xbrl_file)
 
-    def _find_file(self, kind, as_xml=True):
+    def find_path(self, kind):
         # TDNET report file name spec. is like EDINET
         suffix = {
             "xbrl": ".xbrl", "xsd": ".xsd", "cal": "-cal.xml", "def": "-def.xml",
@@ -29,15 +29,9 @@ class Doc(BaseDoc):
             path = os.path.join(os.path.dirname(self.file_spec), "manifest.xml")
             if len(path)==0:
                 return None
-        else:
+        elif kind in suffix:
             path = self.file_spec + suffix[kind]
-            if not os.path.isfile(path):
-                return None
+        else: # kind=file name case
+            path = os.path.join(os.path.dirname(self.file_spec), kind)
 
-        if as_xml:
-            xml = None
-            with open(path, encoding="utf-8-sig") as f:
-                xml = BeautifulSoup(f, "lxml-xml")
-            return xml
-        else:
-            return path
+        return path

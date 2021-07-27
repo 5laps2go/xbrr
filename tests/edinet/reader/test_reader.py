@@ -50,7 +50,7 @@ class TestReader(unittest.TestCase):
         value = xbrl.find("jpcrp_cor:NumberOfEmployees").value()
         print(value.to_dict())
         self.assertEqual(value.value, "19081")
-        self.assertEqual(value.decimals, "0") # TODO: label should be lazy loaded.
+        self.assertEqual(value.decimals, "0")
 
     def test_taxonomy_year(self):
         self.assertEqual(self.reader.taxonomy_year, "2018")
@@ -71,9 +71,9 @@ class TestReader(unittest.TestCase):
         taxonomy_element = self.reader.read_by_link("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd#jpcrp_cor_AnnexedDetailedScheduleOfProvisionsTextBlock")
         local_element = self.reader.read_by_link("jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26.xsd#jpcrp030000-asr_E00436-000_ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsHeading")
         self.assertTrue(taxonomy_element)
-        self.assertEqual(taxonomy_element.label(), "引当金明細表")
+        self.assertEqual(taxonomy_element.label, "引当金明細表")
         self.assertTrue(local_element)
-        self.assertTrue(local_element.label(), "経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析")
+        self.assertTrue(local_element.label, "経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析")
 
     def test_read_schema_by_role(self):
         bs = self.reader.read_schema_by_role("http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet")

@@ -12,15 +12,8 @@ class Doc(BaseDoc):
         self.file_spec = os.path.splitext(self.xbrl_file)[0]
 
 
-    def _find_file(self, kind, as_xml=True):
+    def find_path(self, kind):
         if kind != "xbrl":
             return None
 
-        path = self.xbrl_file
-        if as_xml:
-            xml = None
-            with open(path, encoding="utf-8-sig") as f:
-                xml = BeautifulSoup(f, "lxml-xml")
-            return xml
-        else:
-            return path
+        return self.xbrl_file

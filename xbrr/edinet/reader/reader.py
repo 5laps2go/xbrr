@@ -2,6 +2,7 @@ import os
 import importlib
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 from bs4 import BeautifulSoup
 from joblib import Parallel, delayed
 if importlib.util.find_spec("pandas") is not None:
@@ -11,15 +12,19 @@ from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.taxonomy import Taxonomy
 from xbrr.edinet.reader.element import Element
 from xbrr.edinet.reader.element_schema import ElementSchema
+from xbrr.edinet.reader.role_schema import RoleSchema
 
 
 class Reader(BaseReader):
 
     def __init__(self, xbrl_doc: Doc, taxonomy=None, save_dir: str = ""):
         super().__init__("edinet")
-        self.__xbrl_doc = xbrl_doc
         self.xbrl_doc = xbrl_doc
         self.save_dir = save_dir
+        self._linkbaseRef = {}
+        self._xsd_dics: Dict[str, ElementSchema] = {}
+        self._role_dic = {}
+        self._context_dic = {}
         self._cache = {}
 
         if isinstance(taxonomy, Taxonomy):
@@ -35,9 +40,9 @@ class Reader(BaseReader):
         return self
 
     def __reduce_ex__(self, proto):
-        return type(self), (self.__xbrl_doc, self.taxonomy)
+        return type(self), (self.xbrl_doc, self.taxonomy)
 
-    def __set_taxonomy_year(self):
+    def __set_taxonomy_year(self): # TODO: TDNET specific method required. this is EDINET specific method.
         self.taxonomy_year = ""
         date = self.xbrl.find("jpdei_cor:CurrentFiscalYearEndDateDEI").text
         kind = self.xbrl.find("jpdei_cor:TypeOfCurrentPeriodDEI").text
@@ -64,7 +69,7 @@ class Reader(BaseReader):
             link = element["xlink:href"]
             roles[element["roleURI"]] = {
                 "link": element["xlink:href"],
-                "name": self.read_by_link(link).element.find("link:definition").text
+                "name": self.read_role_by_link(link).label
             }
 
         return roles
@@ -86,61 +91,65 @@ class Reader(BaseReader):
     @property
     def xbrl(self):
         if self.xbrl_doc.has_schema:
-            path = self.xbrl_doc._find_file("xbrl", as_xml=False)
+            path = self.xbrl_doc.find_file("xbrl", as_xml=False)
         else:
             path = self.xbrl_doc.xbrl_file
         return self._read_from_cache(path)
 
     def _read_from_cache(self, path):
-        xml = None
-        if path in self._cache:
-            xml = self._cache[path]
-        else:
+        if path not in self._cache:
             with open(path, encoding="utf-8-sig") as f:
                 xml = BeautifulSoup(f, "lxml-xml")
             self._cache[path] = xml
         return self._cache[path]
 
-    def link_to_path(self, link):
-        path = link
-        element = ""
-        if "#" in link:
-            path, element = link.split("#")
-        if self.taxonomy and path.startswith(self.taxonomy.prefix):
-            path = path.replace(self.taxonomy.prefix, "")
-            path = os.path.join(self.taxonomy_path, path)
-            if os.path.isdir(path):
-                _path = Path(path)
-                xbrl_date = _path.name
-                # element should exist if name does not exist.
-                namespace = "_".join(element.split("_")[:-1])
-                path = _path.joinpath(f"{namespace}_{xbrl_date}.xsd")
-        elif self.xbrl_doc.has_schema:
-            path = self.xbrl_doc._find_file("xsd", as_xml=False)
-        else:
-            path = os.path.dirname(self.xbrl_doc.xbrl_file)
-
-        return path
-
     def read_by_link(self, link):
-        if link.startswith(self.taxonomy.prefix):
+        assert "#" in link
+        xsduri = link.split("#")[0]
+        element = link.split("#")[-1]
+        xsd_dic = self.get_xsd_dic(xsduri)
+        return xsd_dic[element]
+
+    def get_xsd_dic(self, xsduri):
+        if xsduri in self._xsd_dics:
+            xsd_dic = self._xsd_dics[xsduri]
+        else:
+            xsd_dic = ElementSchema.read_schema(self, xsduri)
+            # prepare label xml href dict from local xsd
+            ElementSchema.read_label_taxonomy(self, xsduri, xsd_dic)
+            #label_path = self._find_file(_dir, extention)
+            self._xsd_dics[xsduri] = xsd_dic
+        return xsd_dic
+
+    def read_role_by_link(self, link):
+        assert "#" in link
+        role_xsd = link.split("#")[0]
+        element = link.split("#")[-1]
+        if element in self._role_dic:
+            return self._role_dic[element]
+        
+        RoleSchema.read_schema(self, role_xsd, self._role_dic)
+        assert element in self._role_dic
+        return self._role_dic[element]
+
+
+    def read_by_xsduri(self, xsduri, kind):
+        if xsduri.startswith(self.taxonomy.prefix):
             self.taxonomy.download(self.taxonomy_year)
 
-        element = ""
-        if "#" in link:
-            element = link.split("#")[-1]
-
-        path = self.link_to_path(link)
-        xml = self._read_from_cache(path)
-
-        if element:
-            xml = xml.select(f"#{element}")
-            # xml = xml.find("element", {"id": element})
-            if len(xml) > 0:
-                xml = xml[0]
-            xml = Element(element, xml, link, self)
-
+        path = self._xsduri_to_path(xsduri, kind)
+        with open(path, encoding="utf-8-sig") as f:
+            xml = BeautifulSoup(f, "lxml-xml")
         return xml
+
+    def _xsduri_to_path(self, xsduri, kind):
+        href = self.xbrl_doc.find_xmluri(kind, xsduri=xsduri)
+        if self.taxonomy and href.startswith(self.taxonomy.prefix):
+            path = os.path.join(self.taxonomy_path, href.replace(self.taxonomy.prefix, ""))
+        else:
+            # for local uri
+            path = self.xbrl_doc.find_path(href)
+        return path
 
     def has_role_in_link(self, role_link, link_type):
         if link_type == "presentation":
@@ -183,10 +192,6 @@ class Reader(BaseReader):
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]
 
-        def create(reader, reference):
-            return ElementSchema.create_from_reference(
-                        reader, reference, label_kind, label_verbose)
-
         nodes = {}
         arc_role = ""
         if link_type == "calculation":
@@ -207,13 +212,15 @@ class Reader(BaseReader):
             child = locs[arc["xlink:to"]]
 
             if get_name(child) not in nodes:
-                c = create(self, child["xlink:href"]).set_alias(child["xlink:label"])
+                # c = create(self, child["xlink:href"]).set_alias(child["xlink:label"])
+                c = ElementSchema.create_from_reference(self, child["xlink:href"])
                 nodes[get_name(child)] = Node(c, arc["order"])
             else:
                 nodes[get_name(child)].order = arc["order"]
 
             if get_name(parent) not in nodes:
-                p = create(self, parent["xlink:href"]).set_alias(parent["xlink:label"])
+                # p = create(self, parent["xlink:href"]).set_alias(parent["xlink:label"])
+                p = ElementSchema.create_from_reference(self, parent["xlink:href"])
                 nodes[get_name(parent)] = Node(p, i)
 
             nodes[get_name(child)].add_parent(nodes[get_name(parent)])
@@ -304,9 +311,7 @@ class Reader(BaseReader):
                 results.append(_item)
             return results
 
-        results = Parallel(n_jobs=-1)(delayed(read_value)(
-                                        self, t, label_kind, label_verbose)
-                                      for t in targets)
+        results = [read_value(self, t, label_kind, label_verbose) for t in targets]
 
         for r in results:
             if len(r) > 0:
@@ -332,29 +337,26 @@ class Reader(BaseReader):
             return None
 
         reference = tag.replace(":", "_")
+
+        if not self.xbrl_doc.has_schema:
+            reference = f"{element.namespace}/unknown.xsd#{reference}"
+            return Element(tag, element, reference, self)
+
         if element.namespace:
-            path = self.link_to_path(element.namespace)
-            namespace_root, prefix = os.path.split(path)
-            xsd_name = ""
-            if os.path.isdir(namespace_root):
-                fs = [f for f in os.listdir(namespace_root)
-                      if f.startswith(prefix) and f.endswith(".xsd")]
-                if len(fs) > 0:
-                    xsd_name = fs[0]
+            try:
+                xsdloc = self.xbrl_doc.find_xsduri(element.namespace)
+                reference = f"{xsdloc}#{reference}"
+            except LookupError:
+                reference = f"{element.namespace}/unknown.xsd#{reference}"
+            # if xsdloc is not None:
+            #     xsd_name = self.xbrl_doc._schema_dic[element.namespace]
+            #     reference = f"{xsd_name}#{reference}"
+            #     return Element(tag, element, reference, self)
 
-            if element.namespace.startswith(self.taxonomy.prefix):
-                namespace_root = namespace_root.replace(
-                                    str(self.taxonomy_path) + os.sep,
-                                    self.taxonomy.prefix)
-            else:
-                namespace_root = ""
-
-            if namespace_root:
-                reference = f"{namespace_root}/{xsd_name}#{reference}"
-            else:
-                reference = f"{xsd_name}#{reference}"
-
-        return Element(tag, element, reference, self)
+            # for local xsd
+            # xsd_name = os.path.basename(self.xbrl_doc.find_path('xsd'))
+            # reference = f"{xsd_name}#{reference}"
+            return Element(tag, element, reference, self)
 
 
 class Node():

@@ -25,7 +25,7 @@ class BaseParser():
     def read(self, name):
         if name not in self._cache:
             tag = self.tags[name]
-            element = self.reader.find(tag)
+            element = self.reader.find(tag) # TODO: improve element instance handling
             if element:
                 self._cache[name] = element
             else:
