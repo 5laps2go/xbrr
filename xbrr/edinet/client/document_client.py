@@ -37,8 +37,7 @@ class DocumentClient(BaseClient):
             "type": response_type
         }
 
-        # Caution
-        r = requests.get(url, params=params, stream=True, verify=False)
+        r = requests.get(url, params=params, stream=True)
 
         if not r.ok:
             r.raise_for_status()

@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 from bs4 import BeautifulSoup
-from joblib import Parallel, delayed
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 from xbrr.base.reader.base_reader import BaseReader
@@ -13,7 +12,7 @@ from xbrr.edinet.reader.taxonomy import Taxonomy
 from xbrr.edinet.reader.element import Element
 from xbrr.edinet.reader.element_schema import ElementSchema
 from xbrr.edinet.reader.role_schema import RoleSchema
-
+from xbrr.edinet.reader.element_value import ElementValue
 
 class Reader(BaseReader):
 
@@ -34,6 +33,9 @@ class Reader(BaseReader):
             self.taxonomy = Taxonomy(root)
         self.taxonomy_year = ""
         self.__set_taxonomy_year()
+
+        self._context_dic, self._value_dic = ElementValue.read_xbrl_values(self, self.xbrl.find("xbrli:xbrl"))
+
 
     def set_cache(self, cache):
         self._cache = cache
@@ -90,10 +92,7 @@ class Reader(BaseReader):
 
     @property
     def xbrl(self):
-        if self.xbrl_doc.has_schema:
-            path = self.xbrl_doc.find_file("xbrl", as_xml=False)
-        else:
-            path = self.xbrl_doc.xbrl_file
+        path = self.xbrl_doc.find_path('xbrl')
         return self._read_from_cache(path)
 
     def _read_from_cache(self, path):
@@ -348,14 +347,6 @@ class Reader(BaseReader):
                 reference = f"{xsdloc}#{reference}"
             except LookupError:
                 reference = f"{element.namespace}/unknown.xsd#{reference}"
-            # if xsdloc is not None:
-            #     xsd_name = self.xbrl_doc._schema_dic[element.namespace]
-            #     reference = f"{xsd_name}#{reference}"
-            #     return Element(tag, element, reference, self)
-
-            # for local xsd
-            # xsd_name = os.path.basename(self.xbrl_doc.find_path('xsd'))
-            # reference = f"{xsd_name}#{reference}"
             return Element(tag, element, reference, self)
 
 
