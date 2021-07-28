@@ -25,6 +25,8 @@ class Reader(BaseReader):
         self._role_dic = {}
         self._context_dic = {}
         self._cache = {}
+        self._context_dic, self._value_dic, self._namespace_dic =\
+            ElementValue.read_xbrl_values(self, self.xbrl.find("xbrli:xbrl"))
 
         if isinstance(taxonomy, Taxonomy):
             self.taxonomy = taxonomy
@@ -34,7 +36,6 @@ class Reader(BaseReader):
         self.taxonomy_year = ""
         self.__set_taxonomy_year()
 
-        self._context_dic, self._value_dic = ElementValue.read_xbrl_values(self, self.xbrl.find("xbrli:xbrl"))
 
 
     def set_cache(self, cache):
@@ -46,8 +47,8 @@ class Reader(BaseReader):
 
     def __set_taxonomy_year(self): # TODO: TDNET specific method required. this is EDINET specific method.
         self.taxonomy_year = ""
-        date = self.xbrl.find("jpdei_cor:CurrentFiscalYearEndDateDEI").text
-        kind = self.xbrl.find("jpdei_cor:TypeOfCurrentPeriodDEI").text
+        date = self.findv("jpdei_cor:CurrentFiscalYearEndDateDEI").value
+        kind = self.findv("jpdei_cor:TypeOfCurrentPeriodDEI").value
         date = datetime.strptime(date, "%Y-%m-%d")
         for y in sorted(list(self.taxonomy.TAXONOMIES.keys()), reverse=True):
             boarder_date = datetime(int(y[:4]), 3, 31)
@@ -82,13 +83,7 @@ class Reader(BaseReader):
 
     @property
     def namespaces(self):
-        schema = self.xbrl.find("xbrli:xbrl")
-        namespaces = {}
-        for a in schema.attrs:
-            if a.startswith("xmlns:"):
-                namespaces[a.replace("xmlns:", "")] = schema.attrs[a]
-
-        return namespaces
+        return self._namespace_dic
 
     @property
     def xbrl(self):
@@ -268,61 +263,36 @@ class Reader(BaseReader):
 
         schemas = self.read_schema_by_role(role_link, link_type,
                                            label_kind, label_verbose)
-
-        targets = []
-        xbrl_data = []
         if len(schemas) == 0:
             return None
 
+        xbrl_data = []
         for i, row in schemas.iterrows():
-            tag_name = row["name"]
-
-            for n in self.namespaces:
-                if tag_name.startswith(n):
-                    tag_name = tag_name.replace(f"{n}_", f"{n}:")
-                    break
-
-            tag_element = self.xbrl.find(tag_name)
-            if tag_element is None:
+            tag_name = row['name']
+            if tag_name not in self._value_dic:
                 continue
 
-            item = {}
-            for k in schemas.columns:
-                item[k] = row[k]
-
-            targets.append((tag_name, item))
-
-        def read_value(reader, target, label_kind, label_verbose):
-            name, item = target
             results = []
-            for element in reader.find_all(name):
-                value = element.value(label_kind=None,
-                                      label_verbose=False).to_dict()
-                _item = {}
-                for k in item:
-                    _item[k] = item[k]
-                for k in value:
-                    # label is aquired by schema
-                    if not k.endswith("label"):
-                        _item[k] = value[k]
-                _item["name"] = element.name
+            for value in self._value_dic[tag_name]:
+                item = row.to_dict()
+                for k, v in value.to_dict().items():
+                    if not k.endswith('label'):
+                        item[k] = v
+                item['name'] = ':'.join(tag_name.rsplit('_', 1))
 
-                results.append(_item)
-            return results
-
-        results = [read_value(self, t, label_kind, label_verbose) for t in targets]
-
-        for r in results:
-            if len(r) > 0:
-                xbrl_data += r
+                results.append(item)
+            
+            if len(results) > 0:
+                xbrl_data += results
 
         xbrl_data = pd.DataFrame(xbrl_data)
         return xbrl_data
 
-    def find(self, tag, attrs={}, recursive=True, text=None,
-             **kwargs):
-        element = self.xbrl.find(tag, attrs, recursive, text, **kwargs)
-        return self._to_element(tag, element)
+    def findv(self, tag):
+        id = tag.replace(':', '_')
+        if id not in self._value_dic:
+            return None
+        return self._value_dic[id][0] # find returns the first element value only.
 
     def find_all(self, tag, attrs={}, recursive=True, text=None,
                  limit=None, **kwargs):
@@ -336,10 +306,6 @@ class Reader(BaseReader):
             return None
 
         reference = tag.replace(":", "_")
-
-        if not self.xbrl_doc.has_schema:
-            reference = f"{element.namespace}/unknown.xsd#{reference}"
-            return Element(tag, element, reference, self)
 
         if element.namespace:
             try:

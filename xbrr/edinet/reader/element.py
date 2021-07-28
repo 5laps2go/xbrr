@@ -13,7 +13,5 @@ class Element(BaseElement):
         self.reader = reader
 
     def value(self, label_kind="", label_verbose=False):
-        return ElementValue.create_from_element(
-                reader=self.reader, element=self,
-                label_kind=label_kind, label_verbose=label_verbose)
-
+        return ElementValue.create_element_value(
+                self.reader, self.element, self.reader._context_dic)

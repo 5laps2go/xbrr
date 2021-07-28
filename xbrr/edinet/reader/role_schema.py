@@ -11,14 +11,8 @@ class RoleSchema(BaseElementSchema):
 
     @classmethod
     def create_from_reference(cls, reader, reference):
-        if reader.xbrl_doc.has_schema:
-            instance = reader.read_role_by_link(reference)
-            instance.reference = reference
-            return instance
-
-        name = reference.split("#")[-1]
-        label = ""
-        instance = cls(name=name, label=label)
+        instance = reader.read_role_by_link(reference)
+        instance.reference = reference
         return instance
 
     @classmethod

@@ -27,19 +27,19 @@ class TestReader(unittest.TestCase):
         if os.path.exists(cls.reader.taxonomy.root):
             shutil.rmtree(cls.reader.taxonomy.root)
 
-    def test_find(self):
+    def test_findv(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
         xbrl = Reader(testdoc.Doc(path))
-        element = xbrl.find("jpdei_cor:EDINETCodeDEI")
-        self.assertEqual(element.text, "E05739")
+        element_value = xbrl.findv("jpdei_cor:EDINETCodeDEI")
+        self.assertEqual(element_value.value, "E05739")
 
     def test_to_html(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
         xbrl = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
-        html = xbrl.find(tag).html
+        html = xbrl.findv(tag).html
 
         self.assertTrue(html)
 
@@ -47,10 +47,15 @@ class TestReader(unittest.TestCase):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
         xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
-        value = xbrl.find("jpcrp_cor:NumberOfEmployees").value()
-        print(value.to_dict())
-        self.assertEqual(value.value, "19081")
-        self.assertEqual(value.decimals, "0")
+        element_value = xbrl.findv("jpcrp_cor:NumberOfEmployees")
+        self.assertEqual(element_value.value, "19081")
+        self.assertEqual(element_value.decimals, "0")
+
+        self.assertDictEqual(element_value.to_dict(), {
+            'name': 'NumberOfEmployees', 
+            'reference': 'unknown.xsd#jpcrp_cor_NumberOfEmployees', 
+            'value': '19081', 'unit': 'pure', 'decimals': '0', 'consolidated': True, 
+            'context': 'Prior4YearInstant', 'member': '', 'period': '2014-03-31', 'period_start': None, 'label': ''})
 
     def test_taxonomy_year(self):
         self.assertEqual(self.reader.taxonomy_year, "2018")

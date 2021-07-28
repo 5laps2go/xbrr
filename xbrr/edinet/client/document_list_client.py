@@ -43,7 +43,7 @@ class BaseDocumentListClient(BaseClient):
             "type": self.response_type
         }
 
-        r = requests.get(url, params=params, verify=False)  # Caution
+        r = requests.get(url, params=params)
 
         if not r.ok:
             r.raise_for_status()

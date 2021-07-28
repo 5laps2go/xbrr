@@ -17,3 +17,6 @@ class Doc(BaseDoc):
             return None
 
         return self.xbrl_file
+
+    def find_xsduri(self, namespace):
+        return "unknown.xsd"

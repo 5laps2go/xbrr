@@ -11,8 +11,8 @@ class BaseDoc():
     def find_path(self, kind):
         raise NotImplementedError("You have to implement find_path method.")
 
-    def find_file(self, kind):
-        raise NotImplementedError("You have to implement find_file method.")
+    def find_xsduri(self, namespace):
+        raise NotImplementedError("You have to implement find_xsduri method.")
 
     @property
     def has_schema(self):

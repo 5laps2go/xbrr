@@ -1,4 +1,5 @@
 from xbrr.base.reader.base_element_schema import BaseElementSchema
+from bs4.element import NavigableString, Tag
 import bs4
 
 class ElementSchema(BaseElementSchema):
@@ -9,7 +10,7 @@ class ElementSchema(BaseElementSchema):
                  period_type="", balance=""):
         super().__init__()
         self.name = name
-        self.reference = reference # TODO: omit it because name has ns prefix_element name
+        self.reference = reference
         self.label = label
         self.alias = alias
         self.abstract = abstract
@@ -89,11 +90,10 @@ class ElementSchema(BaseElementSchema):
                         res = resource_dic[elem['xlink:to']]
                         ele.set_label(**res) # Label(res['role'], res['text'])
 
-            for child in elem.select("*"):
-                read_label(child)
-
         for elem in label_xml.find_all('link:labelLink'):
-            read_label(elem)
+            for child in elem.children:
+                if isinstance(child, Tag):
+                    read_label(child)
 
     def set_label(self, role, text):
         if role.endswith('label'):

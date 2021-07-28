@@ -14,7 +14,7 @@ class TestFinance(unittest.TestCase):
     def setUpClass(cls):
         _dir = os.path.join(os.path.dirname(__file__), "../../data")
         client = DocumentClient()
-        root_dir = client.get_xbrl("S100G6IU", save_dir=_dir,
+        root_dir = client.get_xbrl("S100LOZE", save_dir=_dir,
                                     expand_level="dir")
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
         cls.reader = Reader(xbrl_doc, save_dir=_dir)
@@ -35,15 +35,27 @@ class TestFinance(unittest.TestCase):
     def test_voluntary_accounting_policy_change(self):
         xbrl = self.get_xbrl()
         feature = xbrl.extract(Finance).voluntary_accounting_policy_change
+        self.assertEqual(feature.name, "jpcrp_cor:NotesVoluntaryChangesInAccountingPoliciesConsolidatedFinancialStatementsTextBlock")
+        self.assertEqual(feature.normalized_text, "")
 
     def test_segment_information(self):
         xbrl = self.get_xbrl()
         feature = xbrl.extract(Finance).segment_information
         self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
+        self.assertEqual(feature.label, "")
+        self.assertEqual(feature.context, "CurrentYearDuration")
 
     def test_real_estate_for_lease(self):
         xbrl = self.get_xbrl()
         feature = xbrl.extract(Finance).real_estate_for_lease
+        self.assertEqual(feature.name, "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock")
+        self.assertEqual(feature.normalized_text, "")
+
+    def test_segment_information_by_EDINET(self):
+        feature = self.reader.extract(Finance).segment_information
+        self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
+        self.assertEqual(feature.label, "セグメント情報等")
+        self.assertEqual(feature.context, "CurrentYearDuration")
 
     def test_bs(self):
         bs = self.reader.extract(Finance).bs()

@@ -47,7 +47,7 @@ class XbrlDoc(BaseDoc):
         if xsduri.startswith('http'):
             namespace = next(k for k,v in self._schema_dic.items() if v==xsduri)
 
-        href = self._find_linkbaseRef(kind, namespace) if kind!='xsd' else self._schema_dic[namespace]
+        href = self._find_linkbaseRef(kind, namespace)
         if len(href) == 0:
             path = self.find_path(kind)
             href = os.path.basename(path)
