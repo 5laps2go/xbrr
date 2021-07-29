@@ -39,7 +39,7 @@ class ElementSchema(BaseElementSchema):
     def read_schema(cls, reader, xsduri):
         xsd_dic = {}
         xml = reader.read_by_xsduri(xsduri, 'xsd')
-        for element in xml.find_all("xsd:element"):
+        for element in xml.find_all("element"):
             # <xsd:element id="jpcrp030000-asr_E00436-000_Subsidy" xbrli:balance="credit" xbrli:periodType="duration" abstract="false" name="Subsidy" nillable="true" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType" />
             instance = cls(name=element["id"], alias=element["name"], 
                             data_type=element["type"], 
@@ -74,12 +74,6 @@ class ElementSchema(BaseElementSchema):
                     verboseLabel_role = "http://www.xbrl.org/2003/role/verboseLabel"                    
                     if elem['xlink:role'] in [label_role, verboseLabel_role]:
                         resource_dic[elem['xlink:label']] = {'role': elem['xlink:role'], 'text': elem.text}
-
-                id = elem["id"]
-                if id is None:
-                    # {http://www.xbrl.org/2003/linkbase}label
-                    return
-                assert id.startswith("label_")
 
             elif elem.name == "labelArc":
                 attrs = elem.attrs

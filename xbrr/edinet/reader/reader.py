@@ -23,7 +23,6 @@ class Reader(BaseReader):
         self._linkbaseRef = {}
         self._xsd_dics: Dict[str, ElementSchema] = {}
         self._role_dic = {}
-        self._context_dic = {}
         self._cache = {}
         self._context_dic, self._value_dic, self._namespace_dic =\
             ElementValue.read_xbrl_values(self, self.xbrl.find("xbrli:xbrl"))
