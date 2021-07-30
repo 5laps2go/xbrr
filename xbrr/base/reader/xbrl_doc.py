@@ -26,18 +26,14 @@ class XbrlDoc(BaseDoc):
         self._schema_dic = read_schemaRefs(xsd_xml)
         self._linkbase_tuples = read_linkbaseRefs(xsd_xml)
 
-    def find_file(self, kind, as_xml=True):
+    def read_file(self, kind):
         path = self.find_path(kind)
         if (not os.path.isfile(path)):
             return None
-
-        if as_xml:
-            xml = None
-            with open(path, encoding="utf-8-sig") as f:
-                xml = BeautifulSoup(f, "lxml-xml")
-            return xml
-
-        return path
+        xml = None
+        with open(path, encoding="utf-8-sig") as f:
+            xml = BeautifulSoup(f, "lxml-xml")
+        return xml
     
     def find_xmluri(self, kind, xsduri):
         if kind == 'xsd':

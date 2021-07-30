@@ -11,6 +11,9 @@ class BaseDoc():
     def find_path(self, kind):
         raise NotImplementedError("You have to implement find_path method.")
 
+    def read_file(self, kind):
+        raise NotImplementedError("You have to implement read_file method.")
+
     def find_xsduri(self, namespace):
         raise NotImplementedError("You have to implement find_xsduri method.")
 
@@ -20,32 +23,32 @@ class BaseDoc():
 
     @property
     def xbrl(self):
-        return self.find_file("xbrl")
+        return self.read_file("xbrl")
 
     @property
     def xsd(self):
-        return self.find_file("xsd")
+        return self.read_file("xsd")
 
     @property
     def cal(self):
-        return self.find_file("cal")
+        return self.read_file("cal")
 
     @property
     def def_(self):
-        return self.find_file("def")
+        return self.read_file("def")
 
     @property
     def lab(self):
-        return self.find_file("lab")
+        return self.read_file("lab")
 
     @property
     def lab_en(self):
-        return self.find_file("lab-en")
+        return self.read_file("lab-en")
 
     @property
     def pre(self):
-        return self.find_file("pre")
+        return self.read_file("pre")
 
     @property
     def man(self):
-        return self.find_file("man")
+        return self.read_file("man")

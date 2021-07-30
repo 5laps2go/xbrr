@@ -15,8 +15,14 @@ class Doc(BaseDoc):
     def find_path(self, kind):
         if kind != "xbrl":
             return None
-
         return self.xbrl_file
+    
+    def read_file(self, kind):
+        if kind != "xbrl":
+            return None
+        with open(self.xbrl_file, encoding="utf-8-sig") as f:
+            xml = BeautifulSoup(f, "lxml-xml")
+        return xml
 
     def find_xsduri(self, namespace):
         return "unknown.xsd"

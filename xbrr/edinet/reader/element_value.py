@@ -109,6 +109,46 @@ class ElementValue(BaseElementValue):
             if isinstance(child, Tag):
                 read_value(child)
         return context_dic, value_dic, namespace_dic
+    
+    @classmethod
+    def read_finance_statement(cls, reader, statement_xml):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        def myen(value):
+            if value=='－':
+                return '000'
+            myen = value.replace(',','').replace('△', '-')
+            return myen
+        def isnum(myen):
+            try:
+                float(myen)
+            except ValueError:
+                return False
+            else:
+                return True
+
+        unit = ''
+        values = []
+        for table in statement_xml.select('table'):
+            for record in table.select('tr'):
+                columns = list(record.select('td'))
+                label = columns[0].text.strip()
+                value = myen(columns[-1].text.strip())
+                if isnum(value):
+                    # lazy_schema = lambda : dotdict({'label': label})
+                    # context_ref = {}
+                    values.append((label, value+unit))
+                else:
+                    assert value=='' or '単位：' in value or '当連結会計年度' in value
+                    if '単位：百万円' in value:
+                        unit = '000000'
+                    elif '単位：円' in value:
+                        unit = ''
+        return values
 
     def to_dict(self):
         context_id = self.context_ref['id']

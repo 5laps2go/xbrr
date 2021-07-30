@@ -9,7 +9,6 @@ if importlib.util.find_spec("pandas") is not None:
 from xbrr.base.reader.base_reader import BaseReader
 from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.taxonomy import Taxonomy
-from xbrr.edinet.reader.element import Element
 from xbrr.edinet.reader.element_schema import ElementSchema
 from xbrr.edinet.reader.role_schema import RoleSchema
 from xbrr.edinet.reader.element_value import ElementValue
@@ -21,9 +20,8 @@ class Reader(BaseReader):
         self.xbrl_doc = xbrl_doc
         self.save_dir = save_dir
         self._linkbaseRef = {}
-        self._xsd_dics: Dict[str, ElementSchema] = {}
+        self._xsd_dic = {}
         self._role_dic = {}
-        self._cache = {}
         self._context_dic, self._value_dic, self._namespace_dic =\
             ElementValue.read_xbrl_values(self, self.xbrl.find("xbrli:xbrl"))
 
@@ -36,10 +34,6 @@ class Reader(BaseReader):
         self.__set_taxonomy_year()
 
 
-
-    def set_cache(self, cache):
-        self._cache = cache
-        return self
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy)
@@ -64,17 +58,11 @@ class Reader(BaseReader):
 
     @property
     def roles(self):
-        role_refs = self.find_all("link:roleRef")
-        roles = {}
-        for e in role_refs:
-            element = e.element
-            link = element["xlink:href"]
-            roles[element["roleURI"]] = {
-                "link": element["xlink:href"],
-                "name": self.read_role_by_link(link).label
-            }
-
-        return roles
+        if len(self._role_dic) == 0:
+            for element in self.xbrl_doc.pre.find_all("link:roleRef"):
+                role_name = element["xlink:href"].split("#")[-1]
+                self._role_dic[role_name] = RoleSchema.create_role_schema(self, element)
+        return self._role_dic
 
     @property
     def taxonomy_path(self):
@@ -86,45 +74,24 @@ class Reader(BaseReader):
 
     @property
     def xbrl(self):
-        path = self.xbrl_doc.find_path('xbrl')
-        return self._read_from_cache(path)
-
-    def _read_from_cache(self, path):
-        if path not in self._cache:
-            with open(path, encoding="utf-8-sig") as f:
-                xml = BeautifulSoup(f, "lxml-xml")
-            self._cache[path] = xml
-        return self._cache[path]
+        return self.xbrl_doc.xbrl
 
     def read_by_link(self, link):
         assert "#" in link
         xsduri = link.split("#")[0]
         element = link.split("#")[-1]
-        xsd_dic = self.get_xsd_dic(xsduri)
-        return xsd_dic[element]
-
-    def get_xsd_dic(self, xsduri):
-        if xsduri in self._xsd_dics:
-            xsd_dic = self._xsd_dics[xsduri]
-        else:
-            xsd_dic = ElementSchema.read_schema(self, xsduri)
+        if element not in self._xsd_dic:
+            self._xsd_dic.update(ElementSchema.read_schema(self, xsduri))
             # prepare label xml href dict from local xsd
-            ElementSchema.read_label_taxonomy(self, xsduri, xsd_dic)
-            #label_path = self._find_file(_dir, extention)
-            self._xsd_dics[xsduri] = xsd_dic
-        return xsd_dic
+            ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
+        return self._xsd_dic[element]
 
-    def read_role_by_link(self, link):
-        assert "#" in link
-        role_xsd = link.split("#")[0]
-        element = link.split("#")[-1]
-        if element in self._role_dic:
-            return self._role_dic[element]
-        
-        RoleSchema.read_schema(self, role_xsd, self._role_dic)
-        assert element in self._role_dic
-        return self._role_dic[element]
-
+    def get_role(self, role_name):
+        if '/' in role_name:
+            role_name = role_name.rsplit('/', 1)[-1]
+        if role_name not in self._role_dic:
+            self.roles
+        return self._role_dic[role_name]
 
     def read_by_xsduri(self, xsduri, kind):
         if xsduri.startswith(self.taxonomy.prefix):
@@ -158,7 +125,7 @@ class Reader(BaseReader):
         else:
             return False
 
-    def read_schema_by_role(self, role_link, link_type="presentation",
+    def read_schema_by_role(self, role_name, link_type="presentation",
                             label_kind="", label_verbose=False):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
@@ -178,7 +145,7 @@ class Reader(BaseReader):
             raise Exception(f"Does not support {link_type}.")
 
         schemas = []
-        role = doc.find(link_node, {"xlink:role": role_link})
+        role = doc.find(link_node, {"xlink:role": self.get_role(role_name).uri})
         if role is None:
             return schemas
 
@@ -286,33 +253,35 @@ class Reader(BaseReader):
 
         xbrl_data = pd.DataFrame(xbrl_data)
         return xbrl_data
+    
+    def read_value_by_textblock(self, accounting_standard, finance_statement):
+        textblock_element = {
+            'ifrs': {
+                'bs':'jpigp_cor:ConsolidatedStatementOfFinancialPositionIFRSTextBlock',
+                'pl':'jpigp_cor:ConsolidatedStatementOfProfitOrLossIFRSTextBlock',
+                'cf':'jpigp_cor:ConsolidatedStatementOfCashFlowsIFRSTextBlock',
+            },
+            'sec': {
+                'bs': 'jpcrp_cor:ConsolidatedBalanceSheetTextBlock',
+                'pl': 'jpcrp_cor:ConsolidatedStatementOfIncomeTextBlock',
+                'cf': 'jpcrp_cor:ConsolidatedStatementOfCashFlowsTextBlock',
+            },
+            'jp': {
+                'bs': 'jpcrp_cor:ConsolidatedBalanceSheetTextBlock',
+                'pl': 'jpcrp_cor:ConsolidatedStatementOfIncomeTextBlock',
+                'cf': 'jpcrp_cor:ConsolidatedStatementOfCashFlowsTextBlock',
+            }
+        }
+        textblock = textblock_element[accounting_standard][finance_statement]
+        element_value = self.findv(textblock)
+        statement_values = ElementValue.read_finance_statement(self, element_value.html)
+        return statement_values
 
     def findv(self, tag):
         id = tag.replace(':', '_')
         if id not in self._value_dic:
             return None
         return self._value_dic[id][0] # find returns the first element value only.
-
-    def find_all(self, tag, attrs={}, recursive=True, text=None,
-                 limit=None, **kwargs):
-        elements = self.xbrl.find_all(
-                        tag, attrs, recursive, text, limit, **kwargs)
-
-        return [self._to_element(tag, e) for e in elements]
-
-    def _to_element(self, tag, element):
-        if element is None:
-            return None
-
-        reference = tag.replace(":", "_")
-
-        if element.namespace:
-            try:
-                xsdloc = self.xbrl_doc.find_xsduri(element.namespace)
-                reference = f"{xsdloc}#{reference}"
-            except LookupError:
-                reference = f"{element.namespace}/unknown.xsd#{reference}"
-            return Element(tag, element, reference, self)
 
 
 class Node():
