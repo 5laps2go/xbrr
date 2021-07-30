@@ -69,10 +69,11 @@ class ElementValue(BaseElementValue):
         return instance
 
     @classmethod
-    def read_xbrl_values(cls, reader, xbrl_xml):
-        role_dic = {}
+    def read_xbrl_values(cls, reader, xbrl_doc):
         context_dic = {}
         value_dic = {}
+        namespace_dic  = {}
+
         def read_value(elem):
             if elem.prefix == 'link':
                 pass
@@ -98,8 +99,7 @@ class ElementValue(BaseElementValue):
                 else:
                     value_dic[name].append(instance)
         
-
-        namespace_dic  = {}
+        xbrl_xml = xbrl_doc.find("xbrli:xbrl")
         nsdecls = xbrl_xml.attrs
         for a in nsdecls:
             if a.startswith("xmlns:"):
