@@ -21,26 +21,24 @@ class Finance(BaseParser):
         else:
             return False
 
-    def bs(self, ifrs=False, link_type="calculation"):
+    def bs(self, ifrs=False, use_cal_link=True):
         role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet"
         if ifrs and self.use_IFRS:
             role_uri = "http://disclosure.edinet-fsa.go.jp/role/jpigp/rol_ConsolidatedStatementOfFinancialPositionIFRS"
 
-        bs = self.reader.read_value_by_role(role_uri, link_type)
+        bs = self.reader.read_value_by_role(role_uri, use_cal_link)
         if bs is None:
             return None
         else:
             return self.__filter_duplicate(bs)
 
-    def pl(self, ifrs=False, link_type="calculation"):
+    def pl(self, ifrs=False, use_cal_link=True):
         role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_StatementOfIncome"
         if ifrs and self.use_IFRS:
             role_base = "http://disclosure.edinet-fsa.go.jp/role/jpigp/"
             role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeIFRS"
-            if not self.reader.has_role_in_link(role_uri, link_type):
-                role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeSingleStatementIFRS"
 
-        pl = self.reader.read_value_by_role(role_uri, link_type)
+        pl = self.reader.read_value_by_role(role_uri, use_cal_link)
         if pl is None:
             return None
         else:

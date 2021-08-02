@@ -132,27 +132,14 @@ class Reader(BaseReader):
             path = self.xbrl_doc.find_path(href)
         return path
 
-    def has_role_in_link(self, role_link, link_type):
-        if link_type == "presentation":
-            doc = self.xbrl_doc.pre
-        elif link_type == "calculation":
-            doc = self.xbrl_doc.cal
-        else:
-            return False
-
-        role = doc.find("link:roleRef", {"roleURI": role_link})
-        if role is not None:
-            return True
-        else:
-            return False
-
-    def read_schema_by_role(self, role_name):
+    def read_schema_by_role(self, role_name, use_cal_link=False):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
         nodes = {}
         self.make_node_tree(nodes, role_name, self.xbrl_doc.pre, "link:presentationLink", "link:presentationArc", "parent-child")
-        self.make_node_tree(nodes, role_name, self.xbrl_doc.cal, "link:calculationLink", "link:calculationArc", "summation-item")
+        if use_cal_link:
+            self.make_node_tree(nodes, role_name, self.xbrl_doc.cal, "link:calculationLink", "link:calculationArc", "summation-item")
         return self.flatten_to_schemas(nodes)
 
     def make_node_tree(self, nodes, role_name, doc, link_node, arc_node, arc_role):
@@ -176,14 +163,12 @@ class Reader(BaseReader):
             child = locs[arc["xlink:to"]]
 
             if get_name(child) not in nodes:
-                # c = create(self, child["xlink:href"]).set_alias(child["xlink:label"])
                 c = ElementSchema.create_from_reference(self, child["xlink:href"])
                 nodes[get_name(child)] = Node(c, arc["order"])
             else:
                 nodes[get_name(child)].order = arc["order"]
 
             if get_name(parent) not in nodes:
-                # p = create(self, parent["xlink:href"]).set_alias(parent["xlink:label"])
                 p = ElementSchema.create_from_reference(self, parent["xlink:href"])
                 nodes[get_name(parent)] = Node(p, i)
 
@@ -205,12 +190,14 @@ class Reader(BaseReader):
 
             for i, p in zip(reversed(range(parent_depth)), parents):
                 name = p if isinstance(p, str) else p.name
-                order = "0" if isinstance(p, str) else p.order
+                label = p if isinstance(p, str) else p.label
+                # print order: p1(c1, c2) => c1(=p1.order), c2(=p1.order), p1(=p1order+0.1)
+                order = float(n.order)+0.1 if isinstance(p, str) else float(p.order)
                 item[f"parent_{i}"] = name
-                item[f"parent_{i}_label"] = ""
+                item[f"parent_{i}_label"] = label
                 item[f"parent_{i}_order"] = order
 
-            item["order"] = n.order
+            item["order"] = float(n.order)
             item["depth"] = n.depth
             item.update(n.element.to_dict())
             schemas.append(item)
@@ -220,19 +207,10 @@ class Reader(BaseReader):
                                 if c.endswith("order")],
                             inplace=True)
 
-        label_dict = pd.Series(schemas["label"].tolist(),
-                               index=schemas["name"].tolist()).to_dict()
-
-        for i, row in schemas.iterrows():
-            for j in range(parent_depth):
-                name = row[f"parent_{j}"]
-                if name in label_dict:
-                    schemas.loc[i, f"parent_{j}_label"] = label_dict[name]
-
         return schemas
 
 
-    def read_value_by_role(self, role_link, link_type="presentation"):
+    def read_value_by_role(self, role_link, use_cal_link=False):
         schemas = self.read_schema_by_role(role_link)
         if len(schemas) == 0:
             return None

@@ -70,7 +70,7 @@ class TestFinance(unittest.TestCase):
         self.assertGreater(len(pl), 0)
 
     def test_bs_ifrs(self):
-        bs = self.reader.extract(Finance).bs(ifrs=True, link_type="presentation")
+        bs = self.reader.extract(Finance).bs(ifrs=True, use_cal_link=False)
         # bs.to_csv("bs_ifrs.csv", index=False, encoding="shift_jis")
         self.assertTrue(bs is not None)
         self.assertGreater(len(bs), 0)
