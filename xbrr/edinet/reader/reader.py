@@ -86,12 +86,33 @@ class Reader(BaseReader):
             ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
         return self._xsd_dic[element]
 
+    def find_role_name(self, financial_statement):
+        role_candiates = {
+            'bs': [
+                "rol_ConsolidatedStatementOfFinancialPositionIFRS" , "rol_BalanceSheet", "rol_ConsolidatedBalanceSheet"
+            ],
+            'pl': [
+                "rol_ConsolidatedStatementOfProfitOrLossIFRS", "rol_StatementOfIncome", "rol_ConsolidatedStatementOfIncome"
+            ],
+            'cf': [
+                "rol_ConsolidatedStatementOfCashFlowsIFRS", "rol_StatementOfCashFlows-indirect", "rol_StatementOfCashFlows-direct",
+                "rol_ConsolidatedStatementOfCashFlows-indirect", "rol_ConsolidatedStatementOfCashFlows-direct"
+            ],
+        }
+        for name in role_candiates[financial_statement]:
+            if name in self.roles:
+                return name
+        return None
+    
+    def find_accounting_standard(self):
+        if 'IFRS' in self.find_role_name('bs'):
+            return 'IFRS'
+        return 'JP'
+
     def get_role(self, role_name):
         if '/' in role_name:
             role_name = role_name.rsplit('/', 1)[-1]
-        if role_name not in self._role_dic:
-            self.roles
-        return self._role_dic[role_name]
+        return self.roles[role_name]
 
     def read_by_xsduri(self, xsduri, kind):
         if xsduri.startswith(self.taxonomy.prefix):
@@ -125,39 +146,22 @@ class Reader(BaseReader):
         else:
             return False
 
-    def read_schema_by_role(self, role_name, link_type="presentation",
-                            label_kind="", label_verbose=False):
+    def read_schema_by_role(self, role_name):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
-        doc = None
-        link_node = ""
-        arc_node = ""
-        if link_type == "presentation":
-            doc = self.xbrl_doc.pre
-            link_node = "link:presentationLink"
-            arc_node = "link:presentationArc"
-        elif link_type == "calculation":
-            doc = self.xbrl_doc.cal
-            link_node = "link:calculationLink"
-            arc_node = "link:calculationArc"
-        else:
-            raise Exception(f"Does not support {link_type}.")
+        nodes = {}
+        self.make_node_tree(nodes, role_name, self.xbrl_doc.pre, "link:presentationLink", "link:presentationArc", "parent-child")
+        self.make_node_tree(nodes, role_name, self.xbrl_doc.cal, "link:calculationLink", "link:calculationArc", "summation-item")
+        return self.flatten_to_schemas(nodes)
 
-        schemas = []
+    def make_node_tree(self, nodes, role_name, doc, link_node, arc_node, arc_role):
         role = doc.find(link_node, {"xlink:role": self.get_role(role_name).uri})
         if role is None:
-            return schemas
+            return []
 
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]
-
-        nodes = {}
-        arc_role = ""
-        if link_type == "calculation":
-            arc_role = "summation-item"
-        else:
-            arc_role = "parent-child"
 
         locs = {}
         for loc in role.find_all("link:loc"):
@@ -184,6 +188,9 @@ class Reader(BaseReader):
                 nodes[get_name(parent)] = Node(p, i)
 
             nodes[get_name(child)].add_parent(nodes[get_name(parent)])
+
+    def flatten_to_schemas(self, nodes):
+        schemas = []
 
         parent_depth = -1
         for name in nodes:
@@ -224,11 +231,9 @@ class Reader(BaseReader):
 
         return schemas
 
-    def read_value_by_role(self, role_link, link_type="presentation",
-                           label_kind="", label_verbose=False):
 
-        schemas = self.read_schema_by_role(role_link, link_type,
-                                           label_kind, label_verbose)
+    def read_value_by_role(self, role_link, link_type="presentation"):
+        schemas = self.read_schema_by_role(role_link)
         if len(schemas) == 0:
             return None
 
@@ -257,9 +262,9 @@ class Reader(BaseReader):
     def read_value_by_textblock(self, accounting_standard, finance_statement):
         textblock_element = {
             'ifrs': {
-                'bs':'jpigp_cor:ConsolidatedStatementOfFinancialPositionIFRSTextBlock',
-                'pl':'jpigp_cor:ConsolidatedStatementOfProfitOrLossIFRSTextBlock',
-                'cf':'jpigp_cor:ConsolidatedStatementOfCashFlowsIFRSTextBlock',
+                'bs': 'jpigp_cor:ConsolidatedStatementOfFinancialPositionIFRSTextBlock',
+                'pl': 'jpigp_cor:ConsolidatedStatementOfProfitOrLossIFRSTextBlock',
+                'cf': 'jpigp_cor:ConsolidatedStatementOfCashFlowsIFRSTextBlock',
             },
             'sec': {
                 'bs': 'jpcrp_cor:ConsolidatedBalanceSheetTextBlock',
@@ -273,6 +278,8 @@ class Reader(BaseReader):
             }
         }
         textblock = textblock_element[accounting_standard][finance_statement]
+        if accounting_standard == 'ifrs' and 'jpigp_cor' not in self.namespaces:
+            textblock = textblock.replace('jpigp_cor:', 'jpcrp_cor:')
         element_value = self.findv(textblock)
         statement_values = ElementValue.read_finance_statement(self, element_value.html)
         return statement_values
