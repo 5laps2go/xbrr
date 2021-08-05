@@ -1,6 +1,9 @@
 import os
 import glob
+from datetime import datetime
 from xbrr.base.reader.xbrl_doc import XbrlDoc
+from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
+from typing import Tuple, Dict
 
 class Doc(XbrlDoc):
 
@@ -18,7 +21,7 @@ class Doc(XbrlDoc):
         self.file_spec = os.path.splitext(xbrl_file)[0]
         super().__init__("edinet", root_dir=root_dir, xbrl_file=xbrl_file)
 
-    def find_path(self, kind):
+    def find_path(self, kind) -> str:
         # EDINET report file name spec.: https://www.fsa.go.jp/search/20170228/2a_1.pdf (4-3)
         suffix = {
             "xbrl": ".xbrl", "xsd": ".xsd", "cal": "_cal.xml", "def": "_def.xml",
@@ -36,3 +39,35 @@ class Doc(XbrlDoc):
             path = os.path.join(os.path.dirname(self.file_spec), kind)
 
         return path
+
+    @property
+    def default_linkbase(self) -> dict:
+        return {
+            'doc': self.pre,
+            'link_node': 'link:presentationLink',
+            'arc_node': 'link:presentationArc',
+            'roleRef': 'link:roleRef',
+            'arc_role': 'parent-child'
+        }
+
+    @property
+    def published_date(self) -> Tuple[datetime, str]:
+        if 'PublicDoc' in self.file_spec:
+            # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
+            #  split by '_'           0         1           2      3     4
+            #  split by '-'   0      1   2               
+            v1 = os.path.basename(self.file_spec).split('_')
+            v2 = v1[0].split('-')
+            date = datetime.strptime(v1[4], "%Y-%m-%d")
+            period = v2[1][0]
+            return date, period
+        elif 'AuditDoc' in self.file_spec:
+            # AuditDoc/jpaud-aar-cn-001_E00883-000_2020-12-31_01_2021-03-26
+            # split by '_'       0
+            raise NotImplementedError("XBRL for AuditDoc is not implemented")
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+
+    def create_taxonomies(self, root_dir) -> Dict[str, object]:
+        etxnmy = EdinetTaxonomy(root_dir)
+        return {etxnmy.prefix: etxnmy}

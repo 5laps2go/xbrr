@@ -26,7 +26,7 @@ class Finance(BaseParser):
         if ifrs and self.use_IFRS:
             role_uri = "http://disclosure.edinet-fsa.go.jp/role/jpigp/rol_ConsolidatedStatementOfFinancialPositionIFRS"
 
-        bs = self.reader.read_value_by_role(role_uri, use_cal_link)
+        bs = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         if bs is None:
             return None
         else:
@@ -38,7 +38,7 @@ class Finance(BaseParser):
             role_base = "http://disclosure.edinet-fsa.go.jp/role/jpigp/"
             role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeIFRS"
 
-        pl = self.reader.read_value_by_role(role_uri, use_cal_link)
+        pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         if pl is None:
             return None
         else:

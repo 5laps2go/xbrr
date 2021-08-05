@@ -14,7 +14,7 @@ class RoleSchema(BaseElementSchema):
     @property
     def label(self):
         if self._label is None:
-            xsduri = self.href.split('#')[-1]
+            xsduri = self.href.split('#')[0]
             self.lazy_label(xsduri)
         return self._label
 
@@ -35,6 +35,8 @@ class RoleSchema(BaseElementSchema):
             # <link:roleType roleURI="http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet" id="rol_BalanceSheet">
             #     <link:definition>貸借対照表</link:definition>
             # </link:roleType>
+            if element["id"] not in reader._role_dic:
+                continue
             reader._role_dic[element["id"]]._label = element.find("link:definition").text
 
     def to_dict(self):

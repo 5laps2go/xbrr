@@ -3,7 +3,7 @@ import re
 import unittest
 from xbrr.edinet.reader.reader import Reader
 from xbrr.base.reader.base_parser import BaseParser
-from xbrr.edinet.reader.element import Element
+from xbrr.edinet.reader.element_value import ElementValue
 import tests.edinet.reader.doc as testdoc
 
 
@@ -14,7 +14,7 @@ class TestBaseParser(unittest.TestCase):
                             "../data/xbrl2019.xbrl")
         reader = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
-        parser = BaseParser(reader, Element, {
+        parser = BaseParser(reader, ElementValue, {
             "test": tag
         })
         pattern = "^(男性).+(名).+(女性).+(名)"
@@ -26,7 +26,7 @@ class TestBaseParser(unittest.TestCase):
                             "../data/xbrl2019.xbrl")
         reader = Reader(testdoc.Doc(path))
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
-        parser = BaseParser(reader, Element, {
+        parser = BaseParser(reader, ElementValue, {
             "test": tag
         })
         pattern = "^(男性).+(名).+(女性).+(名)"

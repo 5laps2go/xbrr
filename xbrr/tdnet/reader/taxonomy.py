@@ -1,27 +1,19 @@
 from pathlib import Path
 from zipfile import ZipFile
 from datetime import datetime
+from io import BytesIO
 import requests
 from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Taxonomy(BaseTaxonomy):
     TAXONOMIES = {
-        "2013": "https://www.fsa.go.jp/search/20130821/editaxonomy2013New.zip",
-        "2014": "https://www.fsa.go.jp/search/20140310/1c.zip",
-        "2015": "https://www.fsa.go.jp/search/20150310/1c.zip",
-        "2016": "https://www.fsa.go.jp/search/20160314/1c.zip",
-        "2017": "https://www.fsa.go.jp/search/20170228/1c.zip",
-        "2018": "https://www.fsa.go.jp/search/20180228/1c_Taxonomy.zip",
-        "2019": "https://www.fsa.go.jp/search/20190228/1c_Taxonomy.zip",
-        "2019_cg_ifrs": "https://www.fsa.go.jp/search/20180316/1c_Taxonomy.zip",
-        "2020": "https://www.fsa.go.jp/search/20191101/1c_Taxonomy.zip",
-        "2021": "https://www.fsa.go.jp/search/20201110/1c_Taxonomy.zip"
+        "2014": "https://www.jpx.co.jp/equities/listing/xbrl/tvdivq00000088ai-att/61_taxonomy.zip",
     }
 
     def __init__(self, taxonomy_root):
         super().__init__(
-            root=taxonomy_root,
-            prefix="http://disclosure.edinet-fsa.go.jp/taxonomy/")
+            root = taxonomy_root,
+            prefix = "http://www.xbrl.tdnet.info/taxonomy/")
 
     def __reduce_ex__(self, proto):
         return type(self), (self.root,)
@@ -44,17 +36,9 @@ class Taxonomy(BaseTaxonomy):
 
         if download:
             # Download
-            r = requests.get(self.TAXONOMIES[year], stream=True)
-            with taxonomy_file.open(mode="wb") as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
-
-            # Extract
-            with ZipFile(taxonomy_file, "r") as zip:
-                for f in zip.namelist():
+            def extract_taxonomy(f, zip):
                     if not zip.getinfo(f).is_dir():
                         dirs = Path(f).parts
-                        # Avoid Japanese path
                         taxonomy_at = dirs.index("taxonomy") if "taxonomy" in dirs else -1
                         if taxonomy_at > 0 and len(dirs) > (taxonomy_at + 1):
                             dirs = dirs[(dirs.index("taxonomy") + 1):]
@@ -63,6 +47,23 @@ class Taxonomy(BaseTaxonomy):
                             with _to.open("wb") as _to_f:
                                 _to_f.write(zip.read(f))
 
+            r = requests.get(self.TAXONOMIES[year], stream=True)
+            with taxonomy_file.open(mode="wb") as f:
+                for chunk in r.iter_content(1024):
+                    f.write(chunk)
+
+            # Extract zip files
+            with ZipFile(taxonomy_file, "r") as zip:
+                # zip.extractall(self.root)
+                for name in zip.namelist():
+                    if name.endswith('.zip'):
+                        # We have a zip within a zip
+                        zfiledata = BytesIO(zip.read(name))
+                        with ZipFile(zfiledata) as zip2:
+                            for f in zip2.namelist():
+                                extract_taxonomy(f, zip2)
+                    else:
+                        extract_taxonomy(name, zip)
             taxonomy_file.unlink()
 
         return expand_dir
@@ -71,14 +72,7 @@ class Taxonomy(BaseTaxonomy):
         taxonomy_year = ""
         for y in sorted(list(self.TAXONOMIES.keys()), reverse=True):
             boarder_date = datetime(int(y[:4]), 3, 31)
-            if kind[0] in ("q", "h") and published_date > boarder_date:
+            if published_date > boarder_date:
                 taxonomy_year = y
-            elif published_date >= boarder_date:
-                if y == 2019:
-                    taxonomy_year = "2019_cg_ifrs"
-                else:
-                    taxonomy_year = y
-
-            if taxonomy_year:
                 break
         return taxonomy_year

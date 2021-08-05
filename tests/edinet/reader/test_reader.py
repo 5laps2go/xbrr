@@ -25,8 +25,8 @@ class TestReader(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.reader.xbrl_doc.root_dir)
-        if os.path.exists(cls.reader.taxonomy.root):
-            shutil.rmtree(cls.reader.taxonomy.root)
+        if os.path.exists(cls.reader.taxonomies_root):
+            shutil.rmtree(cls.reader.taxonomies_root)
 
     def test_findv(self):
         path = os.path.join(os.path.dirname(__file__),
@@ -59,7 +59,7 @@ class TestReader(unittest.TestCase):
             'context': 'Prior4YearInstant', 'member': '', 'period': '2014-03-31', 'period_start': None, 'label': ''})
 
     def test_taxonomy_year(self):
-        self.assertEqual(self.reader.taxonomy_year, "2018")
+        self.assertEqual(self.reader.taxonomy_year, ["2018"])
 
     def test_roles(self):
         roles = self.reader.roles
@@ -104,6 +104,14 @@ class TestReader(unittest.TestCase):
         pl = pl[[x for x in pl.dtypes.keys() if pl.dtypes[x]==object]] # drop implementation specific columns
         self.assertGreater(len(pl), 0)
         expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DDYF-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
+        assert_frame_equal(pl, expected_df)
+
+    def test_read_current_value_by_role(self):
+        pl = self.reader.read_value_by_role("rol_StatementOfIncome", scope='Current')
+        pl = pl[[x for x in pl.dtypes.keys() if pl.dtypes[x]==object]] # drop implementation specific columns
+        self.assertGreater(len(pl), 0)
+        expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DDYF-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
+        expected_df = expected_df.loc[expected_df['context'].str.startswith('Current')].reset_index(drop=True)
         assert_frame_equal(pl, expected_df)
 
     def test_read_cf(self):

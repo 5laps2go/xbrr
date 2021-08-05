@@ -25,48 +25,27 @@ class Reader(BaseReader):
         self._context_dic, self._value_dic, self._namespace_dic =\
             ElementValue.read_xbrl_values(self, self.xbrl)
 
-        if isinstance(taxonomy, Taxonomy):
-            self.taxonomy = taxonomy
-        else:
-            root = Path(self.save_dir).joinpath("external")
-            self.taxonomy = Taxonomy(root)
-        self.taxonomy_year = ""
-        self.__set_taxonomy_year()
-
-
+        root = Path(self.save_dir).joinpath("external")
+        self.taxonomies_root = root
+        self.taxonomies = self.xbrl_doc.create_taxonomies(root)
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy)
 
-    def __set_taxonomy_year(self): # TODO: TDNET specific method required. this is EDINET specific method.
-        self.taxonomy_year = ""
-        date = self.findv("jpdei_cor:CurrentFiscalYearEndDateDEI").value
-        kind = self.findv("jpdei_cor:TypeOfCurrentPeriodDEI").value
-        date = datetime.strptime(date, "%Y-%m-%d")
-        for y in sorted(list(self.taxonomy.TAXONOMIES.keys()), reverse=True):
-            boarder_date = datetime(int(y[:4]), 3, 31)
-            if kind[0] in ("Q", "H") and date > boarder_date:
-                self.taxonomy_year = y
-            elif date >= boarder_date:
-                if y == 2019:
-                    self.taxonomy_year = "2019_cg_ifrs"
-                else:
-                    self.taxonomy_year = y
-
-            if self.taxonomy_year:
-                break
-
     @property
     def roles(self):
         if len(self._role_dic) == 0:
-            for element in self.xbrl_doc.pre.find_all("link:roleRef"):
+            linkbase = self.xbrl_doc.default_linkbase
+            for element in linkbase['doc'].find_all(linkbase['roleRef']):
                 role_name = element["xlink:href"].split("#")[-1]
                 self._role_dic[role_name] = RoleSchema.create_role_schema(self, element)
         return self._role_dic
 
     @property
-    def taxonomy_path(self):
-        return self.taxonomy.root.joinpath("taxonomy", str(self.taxonomy_year))
+    def taxonomy_year(self):
+        return list(map(
+            lambda x: x.taxonomy_year(*self.xbrl_doc.published_date),
+            self.taxonomies.values()))
 
     @property
     def namespaces(self):
@@ -86,22 +65,17 @@ class Reader(BaseReader):
             ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
         return self._xsd_dic[element]
 
-    def find_role_name(self, financial_statement):
+    def find_role_name(self, finance_statement):
         role_candiates = {
-            'bs': [
-                "rol_ConsolidatedStatementOfFinancialPositionIFRS" , "rol_BalanceSheet", "rol_ConsolidatedBalanceSheet"
-            ],
-            'pl': [
-                "rol_ConsolidatedStatementOfProfitOrLossIFRS", "rol_StatementOfIncome", "rol_ConsolidatedStatementOfIncome"
-            ],
-            'cf': [
-                "rol_ConsolidatedStatementOfCashFlowsIFRS", "rol_StatementOfCashFlows-indirect", "rol_StatementOfCashFlows-direct",
-                "rol_ConsolidatedStatementOfCashFlows-indirect", "rol_ConsolidatedStatementOfCashFlows-direct"
-            ],
+            'bs': ["StatementOfFinancialPositionIFRS", "BalanceSheet"],
+            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
+            'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
+            'fc': ["Forecasts"],
         }
-        for name in role_candiates[financial_statement]:
-            if name in self.roles:
-                return name
+        for name in role_candiates[finance_statement]:
+            roles = [x for x in self.roles.keys() if name in x]
+            if len(roles) > 0:
+                return roles[0]
         return None
     
     def find_accounting_standard(self):
@@ -115,8 +89,11 @@ class Reader(BaseReader):
         return self.roles[role_name]
 
     def read_by_xsduri(self, xsduri, kind):
-        if xsduri.startswith(self.taxonomy.prefix):
-            self.taxonomy.download(self.taxonomy_year)
+        taxonomy_prefixies = [x for x in self.taxonomies if xsduri.startswith(x)]
+        # if xsduri.startswith(self.taxonomy.prefix):
+        if len(taxonomy_prefixies) > 0:
+            taxonomy_prefix = taxonomy_prefixies[0]
+            self.taxonomies[taxonomy_prefix].download(*self.xbrl_doc.published_date)
 
         path = self._xsduri_to_path(xsduri, kind)
         with open(path, encoding="utf-8-sig") as f:
@@ -124,9 +101,11 @@ class Reader(BaseReader):
         return xml
 
     def _xsduri_to_path(self, xsduri, kind):
-        href = self.xbrl_doc.find_xmluri(kind, xsduri=xsduri)
-        if self.taxonomy and href.startswith(self.taxonomy.prefix):
-            path = os.path.join(self.taxonomy_path, href.replace(self.taxonomy.prefix, ""))
+        href = self.xbrl_doc.find_xmluri(kind, xsduri)
+        taxonomy_prefixies = [x for x in self.taxonomies if href.startswith(x)]
+        if self.taxonomies and len(taxonomy_prefixies) > 0:
+            taxonomy_prefix = taxonomy_prefixies[0]
+            path = os.path.join(self.taxonomies[taxonomy_prefix].path, href.replace(taxonomy_prefix, ""))
         else:
             # for local uri
             path = self.xbrl_doc.find_path(href)
@@ -137,7 +116,8 @@ class Reader(BaseReader):
             raise Exception("XBRL directory is required.")
 
         nodes = {}
-        self.make_node_tree(nodes, role_name, self.xbrl_doc.pre, "link:presentationLink", "link:presentationArc", "parent-child")
+        linkbase = self.xbrl_doc.default_linkbase
+        self.make_node_tree(nodes, role_name, linkbase['doc'], linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
         if use_cal_link:
             self.make_node_tree(nodes, role_name, self.xbrl_doc.cal, "link:calculationLink", "link:calculationArc", "summation-item")
         return self.flatten_to_schemas(nodes)
@@ -151,12 +131,11 @@ class Reader(BaseReader):
             return loc["xlink:href"].split("#")[-1]
 
         locs = {}
-        for loc in role.find_all("link:loc"):
+        for loc in role.find_all("loc"): # "link:loc"
             locs[loc["xlink:label"]] = loc
 
         for i, arc in enumerate(role.find_all(arc_node)):
             if not arc["xlink:arcrole"].endswith(arc_role):
-                print("Unexpected arctype.")
                 continue
 
             parent = locs[arc["xlink:from"]]
@@ -210,7 +189,17 @@ class Reader(BaseReader):
         return schemas
 
 
-    def read_value_by_role(self, role_link, use_cal_link=False):
+    def read_value_by_role(self, role_link:str, scope:str = "", use_cal_link:bool = False):
+        """Read XBRL values in a dataframe which are specified by role and/or context.
+
+        Arguments:
+            role_link {str} -- role name or role uri
+        Keyword Arguments:
+            scope {str} -- context name prefix, eg "Current" for "Current*" (default: {""} for everything)
+            use_cal_link: calculation link used after presentation link (default: {False})
+        Returns:
+            xbrl_data -- Saved XbRL values.
+        """
         schemas = self.read_schema_by_role(role_link)
         if len(schemas) == 0:
             return None
@@ -223,6 +212,8 @@ class Reader(BaseReader):
 
             results = []
             for value in self._value_dic[tag_name]:
+                if not value.context.startswith(scope):
+                    continue
                 item = row.to_dict()
                 for k, v in value.to_dict().items():
                     if not k.endswith('label'):
@@ -236,28 +227,24 @@ class Reader(BaseReader):
 
         xbrl_data = pd.DataFrame(xbrl_data)
         return xbrl_data
-    
-    def read_value_by_textblock(self, accounting_standard, finance_statement):
-        textblock_element = {
-            'ifrs': {
-                'bs': 'jpigp_cor:ConsolidatedStatementOfFinancialPositionIFRSTextBlock',
-                'pl': 'jpigp_cor:ConsolidatedStatementOfProfitOrLossIFRSTextBlock',
-                'cf': 'jpigp_cor:ConsolidatedStatementOfCashFlowsIFRSTextBlock',
-            },
-            'sec': {
-                'bs': 'jpcrp_cor:ConsolidatedBalanceSheetTextBlock',
-                'pl': 'jpcrp_cor:ConsolidatedStatementOfIncomeTextBlock',
-                'cf': 'jpcrp_cor:ConsolidatedStatementOfCashFlowsTextBlock',
-            },
-            'jp': {
-                'bs': 'jpcrp_cor:ConsolidatedBalanceSheetTextBlock',
-                'pl': 'jpcrp_cor:ConsolidatedStatementOfIncomeTextBlock',
-                'cf': 'jpcrp_cor:ConsolidatedStatementOfCashFlowsTextBlock',
-            }
+
+    def find_text_block(self, finance_statement):
+        textblock_candiates = {
+            'bs': ["StatementOfFinancialPositionIFRS", "BalanceSheet"],
+            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
+            'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
+            'fc': ["Forecasts"],
         }
-        textblock = textblock_element[accounting_standard][finance_statement]
-        if accounting_standard == 'ifrs' and 'jpigp_cor' not in self.namespaces:
-            textblock = textblock.replace('jpigp_cor:', 'jpcrp_cor:')
+        for name in textblock_candiates[finance_statement]:
+            values = [x for x in self._value_dic.keys() if name in x and x.endswith('TextBlock')]
+            if len(values) > 0:
+                return values[0]
+        return None
+
+    def read_value_by_textblock(self, accounting_standard, finance_statement):
+        textblock = self.find_text_block(finance_statement)
+        if textblock is None:
+            return None
         element_value = self.findv(textblock)
         statement_values = ElementValue.read_finance_statement(self, element_value.html)
         return statement_values

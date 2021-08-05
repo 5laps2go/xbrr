@@ -44,7 +44,7 @@ class ElementSchema(BaseElementSchema):
             instance = cls(name=element["id"], alias=element["name"], 
                             data_type=element["type"], 
                             period_type=element["xbrli:periodType"],
-                            abstract=element["abstract"],
+                            abstract=element["abstract"] if element.get("abstract") else "",
                             balance=element.get("xbrli:balance") if element.get("xbrli:balance") else "")
             xsd_dic[element["id"]] = instance
         return xsd_dic
@@ -84,7 +84,7 @@ class ElementSchema(BaseElementSchema):
                         res = resource_dic[elem['xlink:to']]
                         ele.set_label(**res) # Label(res['role'], res['text'])
 
-        for elem in label_xml.find_all('link:labelLink'):
+        for elem in label_xml.find_all('labelLink'): # "link:labelLink"
             for child in elem.children:
                 if isinstance(child, Tag):
                     read_label(child)

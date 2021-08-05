@@ -17,6 +17,17 @@ class BaseDoc():
     def find_xsduri(self, namespace):
         raise NotImplementedError("You have to implement find_xsduri method.")
 
+    def create_taxonomies(self, root_dir):
+        raise NotImplementedError("You have to implement create_taxonomies method.")
+
+    @property
+    def published_date(self):
+        raise NotImplementedError("You have to implement published_date.")
+    
+    @property
+    def default_linkbase(self):
+        raise NotImplementedError("You have to implement default_linkbase.")
+        
     @property
     def has_schema(self):
         return self.find_path("xsd") is not None

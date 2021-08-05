@@ -21,8 +21,8 @@ class TestCompany(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(os.path.join(cls.reader.save_dir, "S100G70J"))
-        if os.path.exists(cls.reader.taxonomy.root):
-            shutil.rmtree(cls.reader.taxonomy.root)
+        if os.path.exists(cls.reader.taxonomies_root):
+            shutil.rmtree(cls.reader.taxonomies_root)
 
     def test_history(self):
         feature = self.reader.extract(Company).history

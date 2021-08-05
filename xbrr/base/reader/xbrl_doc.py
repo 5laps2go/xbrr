@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from xbrr.base.reader.base_doc import BaseDoc
 from bs4 import BeautifulSoup
 
@@ -6,6 +7,7 @@ class XbrlDoc(BaseDoc):
 
     def __init__(self, package, root_dir="", xbrl_file=""):
         super().__init__(package, root_dir=root_dir, xbrl_file=xbrl_file)
+        self._cache = {}
 
         def read_schemaRefs(xsd_xml):
             dict = {}
@@ -30,12 +32,12 @@ class XbrlDoc(BaseDoc):
         path = self.find_path(kind)
         if (not os.path.isfile(path)):
             return None
-        xml = None
-        with open(path, encoding="utf-8-sig") as f:
-            xml = BeautifulSoup(f, "lxml-xml")
-        return xml
+        if kind not in self._cache:
+            with open(path, encoding="utf-8-sig") as f:
+                self._cache[kind] = BeautifulSoup(f, "lxml-xml")
+        return self._cache[kind]
     
-    def find_xmluri(self, kind, xsduri):
+    def find_xmluri(self, kind, xsduri) -> str:
         if kind == 'xsd':
             return xsduri
 
@@ -49,7 +51,7 @@ class XbrlDoc(BaseDoc):
             href = os.path.basename(path)
         return href
     
-    def find_xsduri(self, namespace):
+    def find_xsduri(self, namespace) -> dict:
         if namespace not in self._schema_dic:
             if namespace.startswith('http'):
                 raise LookupError("Unknown namespace: " + namespace)
@@ -58,10 +60,10 @@ class XbrlDoc(BaseDoc):
             return xsdloc
         return self._schema_dic[namespace]
 
-    def _find_linkbaseRef(self, kind, namespace):
+    def _find_linkbaseRef(self, kind, namespace) -> str:
         if namespace.startswith('http'):
         # if namespace!="local":
-            ns_base = "/".join(namespace.split('/')[0:-2])
+            ns_base = "/".join(namespace.split('/')[0:-1])
         else:
             ns_base = os.path.basename(os.path.splitext(self.xbrl_file)[0])
 

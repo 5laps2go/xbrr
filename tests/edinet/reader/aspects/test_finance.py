@@ -23,8 +23,8 @@ class TestFinance(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.reader.xbrl_doc.root_dir)
-        if os.path.exists(cls.reader.taxonomy.root):
-            shutil.rmtree(cls.reader.taxonomy.root)
+        if os.path.exists(cls.reader.taxonomies_root):
+            shutil.rmtree(cls.reader.taxonomies_root)
 
     def get_xbrl(self):
         path = os.path.join(os.path.dirname(__file__),
