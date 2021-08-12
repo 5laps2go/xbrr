@@ -14,24 +14,8 @@ class Information(BaseParser):
         super().__init__(reader, ElementValue, tags)
 
     @property
-    def shareholders(self):
-        return self.get_text_value("shareholders")
-
-    @property
-    def dividend_policy(self):
-        return self.get_text_value("dividend_policy")
-
-    @property
-    def directors(self):
-        return self.get_text_value("directors")
-
-    @property
-    def corporate_governance(self):
-        return self.get_text_value("corporate_governance")
-
-    @property
     def number_of_directors(self):
-        value = self.get_text_value("directors")
+        value = self.get_value("directors")
         numbers, ground = self._extract_number_of_directors()
         value.value = numbers["total"]
         value.ground = ground
@@ -39,7 +23,7 @@ class Information(BaseParser):
 
     @property
     def number_of_female_executives(self):
-        value = self.get_text_value("directors")
+        value = self.get_value("directors")
         numbers, ground = self._extract_number_of_directors()
         value.value = numbers["female"]
         value.ground = ground

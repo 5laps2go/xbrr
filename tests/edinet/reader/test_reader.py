@@ -61,32 +61,20 @@ class TestReader(unittest.TestCase):
     def test_taxonomy_year(self):
         self.assertEqual(self.reader.taxonomy_year, ["2018"])
 
-    def test_roles(self):
-        roles = self.reader.roles
+    def test_custom_roles(self):
+        roles = self.reader.custom_roles
         self.assertEqual(len(roles), 12)
         self.assertTrue("rol_BalanceSheet" in roles)
         self.assertTrue("rol_StatementOfIncome" in roles)
 
-    def test_find_role_name(self):
-        bs_role = self.reader.find_role_name('bs')
-        self.assertTrue("BalanceSheet" in bs_role)
-        pl_role = self.reader.find_role_name('pl')
-        self.assertTrue("Income" in pl_role)
-        cf_role = self.reader.find_role_name('cf')
-        self.assertIsNone(cf_role)
-        print(bs_role, pl_role, cf_role)
-
-    def test_find_accounting_standard(self):
-        self.assertEqual(self.reader.find_accounting_standard(), 'JP')
-        
     def test_namespaces(self):
         namespaces = self.reader.namespaces
         self.assertEqual(len(namespaces), 10)
         self.assertFalse("jpigp_cor" in namespaces) # true means IFRS accounting standard
 
-    def test_read_by_link(self):
-        taxonomy_element = self.reader.read_by_link("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd#jpcrp_cor_AnnexedDetailedScheduleOfProvisionsTextBlock")
-        local_element = self.reader.read_by_link("jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26.xsd#jpcrp030000-asr_E00436-000_ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsHeading")
+    def test_get_schema_by_link(self):
+        taxonomy_element = self.reader.get_schema_by_link("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd#jpcrp_cor_AnnexedDetailedScheduleOfProvisionsTextBlock")
+        local_element = self.reader.get_schema_by_link("jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26.xsd#jpcrp030000-asr_E00436-000_ManagementAnalysisOfFinancialPositionOperatingResultsAndCashFlowsHeading")
         self.assertTrue(taxonomy_element)
         self.assertEqual(taxonomy_element.label, "引当金明細表")
         self.assertTrue(local_element)
@@ -113,7 +101,3 @@ class TestReader(unittest.TestCase):
         expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DDYF-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
         expected_df = expected_df.loc[expected_df['context'].str.startswith('Current')].reset_index(drop=True)
         assert_frame_equal(pl, expected_df)
-
-    def test_read_cf(self):
-        cf = self.reader.read_value_by_textblock('ifrs', 'cf')
-        self.assertGreater(len(cf), 0)

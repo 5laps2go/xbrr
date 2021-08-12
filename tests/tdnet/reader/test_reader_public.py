@@ -5,8 +5,6 @@ from xbrr.tdnet.client.document_client import DocumentClient
 from xbrr.edinet.reader.reader import Reader
 from xbrr.tdnet.reader.doc import Doc
 import pandas as pd
-from pandas.testing import assert_frame_equal
-
 
 class TestReader(unittest.TestCase):
 
@@ -28,34 +26,26 @@ class TestReader(unittest.TestCase):
         if os.path.exists(cls.reader.taxonomies_root):
             shutil.rmtree(cls.reader.taxonomies_root)
 
-    def test_roles(self):
-        roles = self.reader.roles
+    def test_custom_roles(self):
+        roles = self.reader.custom_roles
         self.assertTrue(len(roles) > 0)
-        for k,v in roles.items():
-            print(v.label, k)
+        self.assertIn('rol_QuarterlyConsolidatedBalanceSheet', roles)               # 310030 四半期連結貸借対照表
+        self.assertIn('rol_YearToQuarterEndConsolidatedStatementOfComprehensiveIncome', roles)  # 322031 四半期連結包括利益計算書　四半期連結累計期間
+        self.assertIn('rol_YearToQuarterEndConsolidatedStatementOfIncome', roles)   # 321031 四半期連結損益（及び包括利益）計算書　四半期連結累計期間
+        self.assertIn('RoleAttachedDocument', roles)
+        # for k,v in roles.items():
+        #     print(v.label, k)
 
-    def test_find_accounting_standard(self):
-        self.assertEqual(self.reader.find_accounting_standard(), 'JP')
-        
     def test_namespaces(self):
         namespaces = self.reader.namespaces
         self.assertTrue(len(namespaces) > 0)
+        self.assertIn('jpdei_cor', namespaces)
+        self.assertIn('jppfs_cor', namespaces)
+        self.assertIn('jpcrp_cor', namespaces)
+        self.assertIn('tse-qcedjpfr-15150', namespaces)
 
     def test_read_value_by_role(self):
         # rol_QuarterlyConsolidatedBalanceSheet                             310030 四半期連結貸借対照表                                
-        # rol_YearToQuarterEndConsolidatedStatementOfComprehensiveIncome    322031 四半期連結包括利益計算書　四半期連結累計期間             
-        # rol_YearToQuarterEndConsolidatedStatementOfIncome                 321031 四半期連結損益（及び包括利益）計算書　四半期連結累計期間   
-        pl_role = self.reader.find_role_name('pl')
-        bro = self.reader.read_value_by_role(pl_role)
-        bro.to_csv(os.path.join(self._dir, 'test_bro.csv'))
+        bro = self.reader.read_value_by_role('rol_YearToQuarterEndConsolidatedStatementOfIncome')
+        # bro.to_csv(os.path.join(self._dir, 'test_bro.csv'))
         self.assertGreater(len(bro), 0)
-
-    def test_read_cf(self):
-        cf_role = self.reader.find_role_name('cf')
-        if cf_role is not None:
-            bro = self.reader.read_value_by_role(cf_role)
-            bro.to_csv(os.path.join(self._dir, 'test_bro.csv'))
-        else:
-            cf = self.reader.read_value_by_textblock('ifrs', 'cf')
-            if cf is not None:
-                self.assertGreater(len(cf), 0)

@@ -13,18 +13,3 @@ class Company(BaseParser):
         }
         super().__init__(reader, ElementValue, tags)
 
-    @property
-    def history(self):
-        return self.get_text_value("history")
-
-    @property
-    def business_description(self):
-        return self.get_text_value("business_description")
-
-    @property
-    def affiliated_entities(self):
-        return self.get_text_value("affiliated_entities")
-
-    @property
-    def employees(self):
-        return self.get_text_value("employees")

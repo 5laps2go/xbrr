@@ -14,10 +14,16 @@ class ElementSchema(BaseElementSchema):
         self.label = label
         self.alias = alias
         self.abstract = abstract
-        self.data_type = data_type
         self.period_type = period_type
         self.balance = balance
         self.verbose_label = ""
+
+        # data types:
+        #  domain, textBlock, percent, perShare, boolean, date, decimal,
+        #  monetary, nonNegativeInteger, shares, string
+        self.data_type = data_type
+        if data_type is not None and ':' in data_type:
+            self.data_type = data_type.split(':')[-1].replace('ItemType','')
 
     def set_alias(self, alias):
         self.alias = alias
@@ -30,7 +36,7 @@ class ElementSchema(BaseElementSchema):
             instance = cls(name=name, reference=reference)
             return instance
 
-        instance = reader.read_by_link(reference)
+        instance = reader.get_schema_by_link(reference)
         instance.reference = reference
         return instance
 
@@ -38,7 +44,7 @@ class ElementSchema(BaseElementSchema):
     @classmethod
     def read_schema(cls, reader, xsduri):
         xsd_dic = {}
-        xml = reader.read_by_xsduri(xsduri, 'xsd')
+        xml = reader.read_uri(xsduri)
         for element in xml.find_all("element"):
             # <xsd:element id="jpcrp030000-asr_E00436-000_Subsidy" xbrli:balance="credit" xbrli:periodType="duration" abstract="false" name="Subsidy" nillable="true" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType" />
             instance = cls(name=element["id"], alias=element["name"], 
@@ -51,7 +57,7 @@ class ElementSchema(BaseElementSchema):
 
     @classmethod
     def read_label_taxonomy(cls, reader, xsduri, xsd_dic):
-        label_xml = reader.read_by_xsduri(xsduri, 'lab')
+        label_xml = reader.read_label_of_xsd(xsduri)
         loc_dic = {}
         resource_dic = {}
 

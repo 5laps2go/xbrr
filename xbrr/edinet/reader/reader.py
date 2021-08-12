@@ -2,7 +2,7 @@ import os
 import importlib
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 from bs4 import BeautifulSoup
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
@@ -19,7 +19,6 @@ class Reader(BaseReader):
         super().__init__("edinet")
         self.xbrl_doc = xbrl_doc
         self.save_dir = save_dir
-        self._linkbaseRef = {}
         self._xsd_dic = {}
         self._role_dic = {}
         self._context_dic, self._value_dic, self._namespace_dic =\
@@ -33,12 +32,10 @@ class Reader(BaseReader):
         return type(self), (self.xbrl_doc, self.taxonomy)
 
     @property
-    def roles(self):
+    def custom_roles(self):
         if len(self._role_dic) == 0:
             linkbase = self.xbrl_doc.default_linkbase
-            for element in linkbase['doc'].find_all(linkbase['roleRef']):
-                role_name = element["xlink:href"].split("#")[-1]
-                self._role_dic[role_name] = RoleSchema.create_role_schema(self, element)
+            self._role_dic.update(RoleSchema.read_role_ref(self, linkbase['doc']))
         return self._role_dic
 
     @property
@@ -55,7 +52,7 @@ class Reader(BaseReader):
     def xbrl(self):
         return self.xbrl_doc.xbrl
 
-    def read_by_link(self, link):
+    def get_schema_by_link(self, link:str) -> ElementSchema:
         assert "#" in link
         xsduri = link.split("#")[0]
         element = link.split("#")[-1]
@@ -65,50 +62,35 @@ class Reader(BaseReader):
             ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
         return self._xsd_dic[element]
 
-    def find_role_name(self, finance_statement):
-        role_candiates = {
-            'bs': ["StatementOfFinancialPositionIFRS", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
-            'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
-            'fc': ["Forecasts"],
-        }
-        for name in role_candiates[finance_statement]:
-            roles = [x for x in self.roles.keys() if name in x]
-            if len(roles) > 0:
-                return roles[0]
-        return None
-    
-    def find_accounting_standard(self):
-        if 'IFRS' in self.find_role_name('bs'):
-            return 'IFRS'
-        return 'JP'
-
-    def get_role(self, role_name):
+    def get_role(self, role_name) -> RoleSchema:
         if '/' in role_name:
             role_name = role_name.rsplit('/', 1)[-1]
-        return self.roles[role_name]
+        return self.custom_roles[role_name]
 
-    def read_by_xsduri(self, xsduri, kind):
-        taxonomy_prefixies = [x for x in self.taxonomies if xsduri.startswith(x)]
-        # if xsduri.startswith(self.taxonomy.prefix):
+    def read_uri(self, uri:str) -> BeautifulSoup:
+        "read xsd or xml specifed by uri"
+        taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
         if len(taxonomy_prefixies) > 0:
             taxonomy_prefix = taxonomy_prefixies[0]
             self.taxonomies[taxonomy_prefix].download(*self.xbrl_doc.published_date)
 
-        path = self._xsduri_to_path(xsduri, kind)
+        path = self._uri_to_path(uri)
         with open(path, encoding="utf-8-sig") as f:
             xml = BeautifulSoup(f, "lxml-xml")
         return xml
 
-    def _xsduri_to_path(self, xsduri, kind):
-        href = self.xbrl_doc.find_xmluri(kind, xsduri)
-        taxonomy_prefixies = [x for x in self.taxonomies if href.startswith(x)]
+    def read_label_of_xsd(self, xsduri:str) -> BeautifulSoup:
+        "read label linkbase content specified by xsd uri"
+        laburi = self.xbrl_doc.find_laburi(xsduri, 'lab')
+        return self.read_uri(laburi)
+
+    def _uri_to_path(self, uri:str) -> str:
+        taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
         if self.taxonomies and len(taxonomy_prefixies) > 0:
             taxonomy_prefix = taxonomy_prefixies[0]
-            path = os.path.join(self.taxonomies[taxonomy_prefix].path, href.replace(taxonomy_prefix, ""))
-        else:
-            # for local uri
-            path = self.xbrl_doc.find_path(href)
+            path = os.path.join(self.taxonomies[taxonomy_prefix].path, uri.replace(taxonomy_prefix, ""))
+        else: # for local uri
+            path = self.xbrl_doc.find_path(uri)
         return path
 
     def read_schema_by_role(self, role_name, use_cal_link=False):
@@ -228,26 +210,11 @@ class Reader(BaseReader):
         xbrl_data = pd.DataFrame(xbrl_data)
         return xbrl_data
 
-    def find_text_block(self, finance_statement):
-        textblock_candiates = {
-            'bs': ["StatementOfFinancialPositionIFRS", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
-            'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
-            'fc': ["Forecasts"],
-        }
-        for name in textblock_candiates[finance_statement]:
-            values = [x for x in self._value_dic.keys() if name in x and x.endswith('TextBlock')]
-            if len(values) > 0:
-                return values[0]
-        return None
-
-    def read_value_by_textblock(self, accounting_standard, finance_statement):
-        textblock = self.find_text_block(finance_statement)
-        if textblock is None:
-            return None
-        element_value = self.findv(textblock)
-        statement_values = ElementValue.read_finance_statement(self, element_value.html)
-        return statement_values
+    def find_value_names(self, candidates:List[str]) -> List[str]:
+        values = []
+        for name in candidates:
+            values += [x for x in self._value_dic.keys() if name in x]
+        return values
 
     def findv(self, tag):
         id = tag.replace(':', '_')

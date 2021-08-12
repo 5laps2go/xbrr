@@ -37,10 +37,8 @@ class XbrlDoc(BaseDoc):
                 self._cache[kind] = BeautifulSoup(f, "lxml-xml")
         return self._cache[kind]
     
-    def find_xmluri(self, kind, xsduri) -> str:
-        if kind == 'xsd':
-            return xsduri
-
+    def find_laburi(self, xsduri, kind) -> str:
+        """find label xml uri by schema uri"""
         namespace = xsduri
         if xsduri.startswith('http'):
             namespace = next(k for k,v in self._schema_dic.items() if v==xsduri)
@@ -51,7 +49,8 @@ class XbrlDoc(BaseDoc):
             href = os.path.basename(path)
         return href
     
-    def find_xsduri(self, namespace) -> dict:
+    def find_xsduri(self, namespace) -> str:
+        """find xsd uri by namespace """
         if namespace not in self._schema_dic:
             if namespace.startswith('http'):
                 raise LookupError("Unknown namespace: " + namespace)

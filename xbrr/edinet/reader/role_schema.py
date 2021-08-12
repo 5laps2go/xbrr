@@ -19,16 +19,23 @@ class RoleSchema(BaseElementSchema):
         return self._label
 
     @classmethod
-    def create_role_schema(cls, reader, roleref_element):
-        link = roleref_element["xlink:href"]
-        role_name = link.split("#")[-1]
-        return RoleSchema(uri=roleref_element["roleURI"],
-                          href=link,
-                          lazy_label=lambda xsduri: RoleSchema.read_schema(reader, xsduri))
+    def read_role_ref(cls, reader, xml, base_xsduri = None):
+        role_dic = {}
+        for element in xml.find_all('roleRef'):
+            role_name = element["xlink:href"].split("#")[-1]
+
+            link = element["xlink:href"]
+            if not link.startswith('http') and base_xsduri != None:
+                link = base_xsduri.rsplit("/",1)[0] + "/" + link
+            role_name = link.split("#")[-1]
+            role_dic[role_name] = RoleSchema(uri=element["roleURI"],
+                                            href=link,
+                                            lazy_label=lambda xsduri: RoleSchema.read_schema(reader, xsduri))
+        return role_dic
 
     @classmethod
     def read_schema(cls, reader, xsduri):
-        xml = reader.read_by_xsduri(xsduri, 'xsd')
+        xml = reader.read_uri(xsduri)
         for element in xml.find_all("link:roleType"):
             # accounting standard='jp':     EDINET/taxonomy/2020-11-01/taxonomy/jppfs/2020-11-01/jppfs_rt_2020-11-01.xsd
             # accounting standard='ifrs':   EDINET/taxonomy/2020-11-01/taxonomy/jpigp/2020-11-01/jpigp_rt_2020-11-01.xsd

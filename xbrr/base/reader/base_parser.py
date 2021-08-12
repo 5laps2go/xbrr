@@ -1,4 +1,5 @@
 import re
+import datetime
 import unicodedata
 
 
@@ -13,7 +14,11 @@ class BaseParser():
         self.tags = {}
         if len(tags) > 0:
             self.tags = tags
-        self._cache = {}
+            
+    def __getattr__(self, name):
+        if name in self.tags.keys():
+            return self.reader.findv(self.tags[name])
+        raise AttributeError
 
     def normalize(self, text):
         if text is None:
@@ -22,10 +27,8 @@ class BaseParser():
         _text = unicodedata.normalize("NFKC", _text)
         return _text
 
-    def get_text_value(self, name):
+    def get_value(self, name):
         value = self.reader.findv(self.tags[name])
-        if not value:
-            return self.value_class(self.tags[name])
         return value
 
     def search(self, name, pattern):

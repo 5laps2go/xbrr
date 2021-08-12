@@ -40,15 +40,10 @@ class TestDoc(unittest.TestCase):
         self.assertEqual(doc.find_xsduri("local"),
                         "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd")
 
-    def test_find_xmluri_xsd(self):
+    def test_find_laburi(self):
         doc = self.doc
-        self.assertEqual(doc.find_xmluri('xsd', doc.find_xsduri("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor")),
-                        "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd")
+        self.assertEqual(doc.find_laburi('local', 'lab'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
+        self.assertEqual(doc.find_laburi('jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd', 'lab'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
 
-    def test_find_xmluri_lab(self):
-        doc = self.doc
-        self.assertEqual(doc.find_xmluri('lab', 'local'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
-        self.assertEqual(doc.find_xmluri('lab', 'jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
-
-        self.assertEqual(doc.find_xmluri('lab', doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor')), 
+        self.assertEqual(doc.find_laburi(doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor'), 'lab'), 
                         "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/label/jpcrp_2018-02-28_lab.xml")

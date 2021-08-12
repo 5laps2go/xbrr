@@ -5,6 +5,8 @@ Following aspects are supported. The format is based on `三号様式` that is c
 0. 文書情報: `Metadata`
     1. 会計年度: `fiscal_year`
     2. 会計期間種別: `fiscal_period_type`
+    3. 会計基準: `accounting_standards`
+    * 企業ID:　`edinet_code`, `security_code`, `company_name`
 1. 企業の概況: `Company`
     1. 主要な経営指標等の推移
     2. 沿革: `history`
@@ -37,6 +39,8 @@ Following aspects are supported. The format is based on `三号様式` that is c
     1. 財務諸表等
         * 貸借対照表: `bs`
         * 損益計算書: `pl`
+        * キャッシュ・フロー計算書: `cf`
+        * 資本等変動計算書: `stock_divedend?`
         * 注記: `notes`
         * 会計方針の変更/会計基準等の改正等以外の正当な理由による会計方針の変更: `voluntary_accounting_policy_change`
         * セグメント情報等: `segment_information`
