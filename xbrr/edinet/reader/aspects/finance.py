@@ -1,5 +1,6 @@
 import warnings
 import re
+import collections
 import importlib
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
@@ -92,13 +93,21 @@ class Finance(BaseParser):
                 return False
             else:
                 return True
+        indent_state = []
+        def indent_label(margin_left):
+            delidx = [i for i,x in enumerate(indent_state) if int(x) > int(margin_left)]
+            if len(delidx) > 0: del indent_state[delidx[0]:]
+            indent_state.append(margin_left)
+            c = collections.Counter(indent_state)
+            ks = sorted(c.keys(), key=int)
+            return "-".join([str(c[x]) for x in ks])
 
         unit = ''
         values = []
         for table in statement_xml.select('table'):
             for record in table.select('tr'):
                 columns = list(record.select('td'))
-                label = columns[0].text.strip()
+                label = ''.join([x.text.strip() for x in columns[0].select('p')])
                 value = myen(columns[-1].text.strip())
                 style_str = columns[0].find('p')['style'] if label != "" else ""
                 m = re.match(r'.*margin-left: *([0-9]*)px.*', style_str)
@@ -107,12 +116,12 @@ class Finance(BaseParser):
                     values.append({
                         'label': label,
                         'value': value + unit,
-                        'indent': m.groups()[0]
+                        'indent': indent_label(m.groups()[0])
                     })
                 elif label != "" and value == "":
                     values.append({
                         'label': label,
-                        'indent': m.groups()[0]
+                        'indent': indent_label(m.groups()[0])
                     })
                 else:
                     assert value=='' or '単位：' in value or '百万円' in value or '当連結会計年度' in value
