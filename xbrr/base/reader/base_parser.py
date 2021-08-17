@@ -17,7 +17,7 @@ class BaseParser():
             
     def __getattr__(self, name):
         if name in self.tags.keys():
-            return self.reader.findv(self.tags[name])
+            return self.get_value(name)
         raise AttributeError
 
     def normalize(self, text):
@@ -29,6 +29,8 @@ class BaseParser():
 
     def get_value(self, name):
         value = self.reader.findv(self.tags[name])
+        if not value:
+            return self.value_class(self.tags[name], value=None)
         return value
 
     def search(self, name, pattern):

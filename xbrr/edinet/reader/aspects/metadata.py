@@ -25,23 +25,17 @@ class Metadata(BaseParser):
     @property
     def fiscal_year(self):
         value = self.get_value("fiscal_date_start")
-        if value:
-            date = datetime.strptime(value.value, "%Y-%m-%d")
-            value.value = date.year
-        return value
+        year = datetime.strptime(value.value, "%Y-%m-%d").year if value.value else None
+        return ElementValue('fiscal_year', value=year)
 
     @property
     def fiscal_year_end_date(self):
         value = self.get_value("fiscal_date_end")
-        if value:
-            date = datetime.strptime(value.value, "%Y-%m-%d")
-            value.value = date
-        return value
+        date = datetime.strptime(value.value, "%Y-%m-%d") if value.value else None
+        return ElementValue('fiscal_year_end_date', value=date)
 
     @property
     def fiscal_month(self):
         value = self.get_value("fiscal_date_start")
-        if value:
-            date = datetime.strptime(value.value, "%Y-%m-%d")
-            value.value = date.month
-        return value
+        month = datetime.strptime(value.value, "%Y-%m-%d").month if value.value else None
+        return ElementValue('fiscal_month', value=month)

@@ -45,7 +45,7 @@ class TestFinancePublic(unittest.TestCase):
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information
-        self.assertIsNone(feature)
+        self.assertIsNone(feature.value)
         # self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
         # self.assertEqual(feature.label, "セグメント情報等")
         # self.assertEqual(feature.context, "CurrentYearDuration")

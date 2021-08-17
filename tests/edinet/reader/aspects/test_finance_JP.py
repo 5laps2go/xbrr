@@ -40,17 +40,16 @@ class TestFinance(unittest.TestCase):
     def test_bs(self):
         bs = self.reader.extract(Finance).bs()
         self.assertTrue(bs is not None)
+        # bs.to_csv(os.path.join(self._dir, 'test_bs.csv'))
         self.assertGreater(len(bs), 0)
 
     def test_pl(self):
         pl = self.reader.extract(Finance).pl()
         self.assertTrue(pl is not None)
+        # pl.to_csv(os.path.join(self._dir, 'test_pl.csv'))
         self.assertGreater(len(pl), 0)
 
     def test_cf(self):
         cf = self.reader.extract(Finance).cf()
-        if type(cf) is not list:
-            # cf.to_csv(os.path.join(self._dir, 'test_cf.csv'))
-            self.assertGreater(len(cf), 0)
-        else:
-            self.assertGreater(len(cf), 0)
+        # cf.to_csv(os.path.join(self._dir, 'test_cf.csv'))
+        self.assertGreater(len(cf), 0)

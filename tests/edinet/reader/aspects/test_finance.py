@@ -35,7 +35,7 @@ class TestFinance(unittest.TestCase):
     def test_voluntary_accounting_policy_change(self):
         xbrl = self.get_xbrl()
         feature = xbrl.extract(Finance).voluntary_accounting_policy_change
-        self.assertEqual(feature, None)
+        self.assertEqual(feature.value, None)
 
     def test_segment_information(self):
         xbrl = self.get_xbrl()
@@ -47,7 +47,7 @@ class TestFinance(unittest.TestCase):
     def test_real_estate_for_lease(self):
         xbrl = self.get_xbrl()
         feature = xbrl.extract(Finance).real_estate_for_lease
-        self.assertEqual(feature, None)
+        self.assertEqual(feature.value, None)
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information

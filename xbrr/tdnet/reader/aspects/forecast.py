@@ -35,7 +35,7 @@ class Forecast(BaseParser):
 
     def fc(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('fc')
-        assert len(role) == 1
+        assert len(role) > 0
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
@@ -53,9 +53,10 @@ class Forecast(BaseParser):
 
     def __find_role_name(self, finance_statement):
         role_candiates = {
-            'fc': ["Forecasts"],
+            'fc': ["RoleForecasts", "Forecasts"],
         }
+        roles = []
         for name in role_candiates[finance_statement]:
-            roles = [x for x in self.reader.custom_roles.keys() if name in x]
+            roles += [x for x in self.reader.custom_roles.keys() if name in x and x not in roles]
         return roles
     

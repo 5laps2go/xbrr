@@ -33,7 +33,7 @@ class TestFinance(unittest.TestCase):
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information
-        self.assertIsNone(feature)
+        self.assertIsNone(feature.value)
         # self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
         # self.assertEqual(feature.label, "セグメント情報等")
         # self.assertEqual(feature.context, "CurrentYearDuration")
@@ -50,8 +50,5 @@ class TestFinance(unittest.TestCase):
 
     def test_cf(self):
         cf = self.reader.extract(Finance).cf()
-        if type(cf) is not list:
-            # cf.to_csv(os.path.join(self._dir, 'test_cf.csv'))
-            self.assertGreater(len(cf), 0)
-        else:
-            self.assertGreater(len(cf), 0)
+        # cf.to_csv(os.path.join(self._dir, 'test_cf.csv'))
+        self.assertGreater(len(cf), 0)

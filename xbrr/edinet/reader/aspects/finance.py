@@ -28,18 +28,22 @@ class Finance(BaseParser):
             return False
 
     def bs(self, ifrs=False, use_cal_link=True):
-        role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet"
-        if ifrs and self.use_IFRS:
-            role_uri = "http://disclosure.edinet-fsa.go.jp/role/jpigp/rol_ConsolidatedStatementOfFinancialPositionIFRS"
+        role = self.__find_role_name('bs')
+        role_uri = self.reader.get_role(role[0]).uri
+        # role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet"
+        # if ifrs and self.use_IFRS:
+        #     role_uri = "http://disclosure.edinet-fsa.go.jp/role/jpigp/rol_ConsolidatedStatementOfFinancialPositionIFRS"
 
         bs = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(bs)
 
     def pl(self, ifrs=False, use_cal_link=True):
-        role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_StatementOfIncome"
-        if ifrs and self.use_IFRS:
-            role_base = "http://disclosure.edinet-fsa.go.jp/role/jpigp/"
-            role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeIFRS"
+        role = self.__find_role_name('pl')
+        role_uri = self.reader.get_role(role[0]).uri
+        # role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_StatementOfIncome"
+        # if ifrs and self.use_IFRS:
+        #     role_base = "http://disclosure.edinet-fsa.go.jp/role/jpigp/"
+        #     role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeIFRS"
 
         pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(pl)
@@ -64,12 +68,13 @@ class Finance(BaseParser):
 
     def __find_role_name(self, finance_statement):
         role_candiates = {
-            'bs': ["StatementOfFinancialPositionIFRS", "BalanceSheet"],
+            'bs': ["StatementOfFinancialPositionIFRS", "ConsolidatedBalanceSheet", "BalanceSheet"],
             'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
             'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
         }
+        roles = []
         for name in role_candiates[finance_statement]:
-            roles = [x for x in self.reader.custom_roles.keys() if name in x and 'Notes' not in x]
+            roles += [x for x in self.reader.custom_roles.keys() if name in x and 'Notes' not in x and x not in roles]
         return roles
 
     def __read_value_by_textblock(self, candidates):
@@ -110,18 +115,19 @@ class Finance(BaseParser):
                 label = ''.join([x.text.strip() for x in columns[0].select('p')])
                 value = myen(columns[-1].text.strip())
                 style_str = columns[0].find('p')['style'] if label != "" else ""
-                m = re.match(r'.*margin-left: *([0-9]*)px.*', style_str)
+                m = re.match(r'.*margin-left: *([0-9]*).?[0-9]*px.*', style_str)
+                margin = m.groups()[0] if m is not None else "0"
 
                 if isnum(value):
                     values.append({
                         'label': label,
                         'value': value + unit,
-                        'indent': indent_label(m.groups()[0])
+                        'indent': indent_label(margin)
                     })
                 elif label != "" and value == "":
                     values.append({
                         'label': label,
-                        'indent': indent_label(m.groups()[0])
+                        'indent': indent_label(margin)
                     })
                 else:
                     assert value=='' or '単位：' in value or '百万円' in value or '当連結会計年度' in value
