@@ -1,4 +1,5 @@
 import os
+import errno
 import glob
 from datetime import datetime
 from xbrr.base.reader.xbrl_doc import XbrlDoc
@@ -15,6 +16,9 @@ class Doc(XbrlDoc):
         def _xbrl_file(root_dir, kind):
             folder_dict = {'public': 'XBRLData/Attachment', 'summary': 'XBRLData/Summary'}
             xsd_files = glob.glob(os.path.join(root_dir, folder_dict[kind]+"/*.xsd"))
+            if not xsd_files:
+                raise FileNotFoundError(
+                    errno.ENOENT, os.strerror(errno.ENOENT), folder_dict[kind])
             xbrl_file = self._prepare_xbrl(xsd_files[0])
             return xbrl_file
         
