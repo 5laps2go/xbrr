@@ -23,15 +23,16 @@ class Forecast(BaseParser):
         m = re.match(r'(第(.)四半期)?決算短信\〔(.*)\〕\((.*)\)', title)
         if m != None:
             self.consolidated = '連結' == m.groups()[3]
-            self.fiscal_period_kind = 'All' if m.groups()[1]==None else 'Q'+m.groups()[1]
+            self.fiscal_period_kind = 'a' if m.groups()[1]==None else m.groups()[1]
             self.accounting_standards = m.groups()[2]
 
     @property
     def use_IFRS(self):
-        if self.find_accounting_standards == 'IFRS':
-            return True
-        else:
-            return False
+        return self.find_accounting_standards == 'IFRS'
+
+    @property
+    def forecast_year(self):
+        return 'NextYear' if self.fiscal_period_kind=='a' else 'CurrentYear'
 
     def fc(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('fc')
@@ -47,7 +48,7 @@ class Forecast(BaseParser):
 
     def __filter_duplicate(self, data):
         # Exclude dimension member
-        data.drop_duplicates(subset=("name", "period"), keep="first",
+        data.drop_duplicates(subset=("name", "member","period"), keep="first",
                              inplace=True)
         return data
 

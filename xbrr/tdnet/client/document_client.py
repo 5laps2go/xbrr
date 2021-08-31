@@ -89,6 +89,10 @@ class DocumentClient():
         Returns:
             str -- Saved file path.
         """
+        xbrl_dir = Path(save_dir).joinpath(document_id)
+        if xbrl_dir.is_dir():
+            return xbrl_dir
+
         path = self.get(document_id+".zip", save_dir)
 
         if expand_level is None or not expand_level or\
@@ -96,7 +100,6 @@ class DocumentClient():
             return path
 
         assert expand_level == "dir"
-        xbrl_dir = path.parent.joinpath(document_id)
         with ZipFile(path, "r") as zip:
             zip.extractall(path=xbrl_dir)
         path.unlink()
