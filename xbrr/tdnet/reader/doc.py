@@ -13,9 +13,14 @@ class Doc(XbrlDoc):
 
     def __init__(self, root_dir="", xbrl_kind=""):
 
+        def _glob_list(folders):
+            for folder in folders:
+                xsd_files = glob.glob(os.path.join(root_dir, folder+"/*.xsd"))
+                if xsd_files: return xsd_files
+            return []
         def _xbrl_file(root_dir, kind):
-            folder_dict = {'public': 'XBRLData/Attachment', 'summary': 'XBRLData/Summary'}
-            xsd_files = glob.glob(os.path.join(root_dir, folder_dict[kind]+"/*.xsd"))
+            folder_dict = {'public': ['XBRLData/Attachment'], 'summary': ['XBRLData/Summary','.']}
+            xsd_files = _glob_list(folder_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
                     errno.ENOENT, os.strerror(errno.ENOENT), folder_dict[kind])
@@ -55,7 +60,7 @@ class Doc(XbrlDoc):
                 'arc_role': 'parent-child'
             }
 
-        assert 'Summary' in self.file_spec
+        assert 'Summary' in self.file_spec or '/./'  in self.file_spec
         return {
             'doc': self.def_,
             'link_node': 'definitionLink',
@@ -73,7 +78,7 @@ class Doc(XbrlDoc):
             date = datetime.strptime("%s-%s-%s" % (v[7], v[8], v[9]), "%Y-%m-%d")
             period = v[1][0]
             return date, period
-        elif 'Summary' in self.file_spec:
+        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
@@ -89,7 +94,7 @@ class Doc(XbrlDoc):
             ttxnmy = TdnetTaxonomy(root_dir)
             return {etxnmy.prefix: etxnmy, ttxnmy.prefix: ttxnmy}
 
-        assert 'Summary' in self.file_spec
+        assert 'Summary' in self.file_spec or '/./'  in self.file_spec
         ttxnmy = TdnetTaxonomy(root_dir)
         return {ttxnmy.prefix: ttxnmy}
 

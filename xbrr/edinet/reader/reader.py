@@ -35,7 +35,7 @@ class Reader(BaseReader):
     def custom_roles(self):
         if len(self._role_dic) == 0:
             linkbase = self.xbrl_doc.default_linkbase
-            self._role_dic.update(RoleSchema.read_role_ref(self, linkbase['doc']))
+            self._role_dic.update(RoleSchema.read_role_ref(self, linkbase['doc'], linkbase['link_node']))
         return self._role_dic
 
     @property

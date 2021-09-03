@@ -22,10 +22,7 @@ class Finance(BaseParser):
 
     @property
     def use_IFRS(self):
-        if self.find_accounting_standards.value == 'IFRS':
-            return True
-        else:
-            return False
+        return self.accounting_standards.value == 'IFRS'
 
     def bs(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('bs')
@@ -52,7 +49,7 @@ class Finance(BaseParser):
         role = self.__find_role_name('cf')
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
-            return self.__read_finance_statement(textblock.html)
+            return self.__read_finance_statement(textblock.html) if textblock is not None else None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 

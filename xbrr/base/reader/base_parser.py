@@ -18,7 +18,7 @@ class BaseParser():
     def __getattr__(self, name):
         if name in self.tags.keys():
             return self.get_value(name)
-        raise AttributeError
+        raise NameError(name)
 
     def normalize(self, text):
         if text is None:

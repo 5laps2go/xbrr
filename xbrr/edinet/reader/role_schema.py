@@ -19,7 +19,8 @@ class RoleSchema(BaseElementSchema):
         return self._label
 
     @classmethod
-    def read_role_ref(cls, reader, xml, base_xsduri = None):
+    def read_role_ref(cls, reader, xml, link_node, base_xsduri = None):
+        link_node_roles = [x["xlink:role"].rsplit("/")[-1] for x in xml.find_all(link_node)]
         role_dic = {}
         for element in xml.find_all('roleRef'):
             role_name = element["xlink:href"].split("#")[-1]
@@ -27,8 +28,8 @@ class RoleSchema(BaseElementSchema):
             link = element["xlink:href"]
             if not link.startswith('http') and base_xsduri != None:
                 link = base_xsduri.rsplit("/",1)[0] + "/" + link
-            role_name = link.split("#")[-1]
-            role_dic[role_name] = RoleSchema(uri=element["roleURI"],
+            if role_name in link_node_roles:
+                role_dic[role_name] = RoleSchema(uri=element["roleURI"],
                                             href=link,
                                             lazy_label=lambda xsduri: RoleSchema.read_schema(reader, xsduri))
         return role_dic
