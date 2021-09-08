@@ -87,6 +87,15 @@ class Forecast(BaseParser):
         fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(fc) if fc is not None else None
 
+    def fc_dividends(self, ifrs=False, use_cal_link=True):
+        role = self.__find_role_name('fc_dividends')
+        if len(role) <= 0: return None
+        role = role[0]
+        role_uri = self.reader.get_role(role).uri
+
+        fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        return self.__filter_duplicate(fc) if fc is not None else None
+
     def __filter_duplicate(self, data):
         # Exclude dimension member
         data.drop_duplicates(subset=("name", "member","period"), keep="first",
@@ -96,6 +105,7 @@ class Forecast(BaseParser):
     def __find_role_name(self, finance_statement):
         role_candiates = {
             'fc': ["RoleForecasts", "Forecasts", "InformationAnnual"],
+            'fc_dividends': ["RoleDividends"],
         }
         roles = []
         for name in role_candiates[finance_statement]:
