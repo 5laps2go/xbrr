@@ -13,17 +13,17 @@ class TestFinancePublic(unittest.TestCase):
     def setUpClass(cls):
         _dir = os.path.join(os.path.dirname(__file__), "../../data")
         client = DocumentClient()
-        # "081220210719468981"Ｊ－日本ラッド １四半期決算短信〔日本基準〕"
-        # "081220210803477803" 日鉄鉱 	2022年3月期 第1四半期決算短信〔日本基準〕（連結）
-        root_dir = client.get_xbrl("081220210803477803", save_dir=_dir,
-                                   expand_level="dir")
+        # "081220210818487667" Ｊ－共和工業 2022年4月期 第1四半期決算短信〔日本基準〕（連結）
+        # root_dir = client.get_xbrl("081220210818487667", save_dir=_dir,
+        #                            expand_level="dir")
+        root_dir = os.path.join(_dir, "081220210818487667")
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
         cls.reader = Reader(xbrl_doc, save_dir=_dir)
         cls._dir = _dir
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(cls.reader.xbrl_doc.root_dir)
+        # shutil.rmtree(cls.reader.xbrl_doc.root_dir)
         if os.path.exists(cls.reader.taxonomies_root):
             shutil.rmtree(cls.reader.taxonomies_root)
 
@@ -41,7 +41,7 @@ class TestFinancePublic(unittest.TestCase):
         self.assertIn('jpdei_cor', namespaces)
         self.assertIn('jppfs_cor', namespaces)
         self.assertIn('jpcrp_cor', namespaces)
-        self.assertIn('tse-qcedjpfr-15150', namespaces)
+        # self.assertIn('tse-qcedjpfr-15150', namespaces)
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information
