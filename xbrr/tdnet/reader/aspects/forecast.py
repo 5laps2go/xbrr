@@ -15,6 +15,7 @@ class Forecast(BaseParser):
 
             "filling_date": "tse-ed-t:FilingDate",
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
+            "dividend_correction_date": "tse-ed-t:ReportingDateOfDividendForecastCorrection",
 
             "sales": "tse-ed-t:Sales",
             "sales_IFRS": "tse-ed-t:SalesIFRS"
@@ -42,7 +43,7 @@ class Forecast(BaseParser):
             self.consolidated = '連結' == m.groups()[5]
             self.fiscal_period_kind = 'a' if m.groups()[1]==None else m.groups()[1]
             self.accounting_standards = m.groups()[3]
-        elif '業績予想' in title:
+        elif ('業績予想' in title or '配当予想' in title):
             self.fiscal_period_kind = '0'
 
     @property
@@ -66,11 +67,13 @@ class Forecast(BaseParser):
             return wareki2year(self.filling_date)
         if self.forecast_correction_date.value is not None:
             return wareki2year(self.forecast_correction_date)
+        if self.dividend_correction_date.value is not None:
+            return wareki2year(self.dividend_correction_date)
         raise NameError('Reporting date not found')
     
     @property
     def reporting_period(self):
-        role = self.__find_role_name('fc')
+        role = self.__find_role_name('fc_test')
         if len(role) <= 0: return 'Q2'
         return 'FY'
 
@@ -105,7 +108,8 @@ class Forecast(BaseParser):
     def __find_role_name(self, finance_statement):
         role_candiates = {
             'fc': ["RoleForecasts", "Forecasts", "InformationAnnual"],
-            'fc_dividends': ["RoleDividends"],
+            'fc_dividends': ["RoleDividends", "RoleRevisedDividend"],
+            'fc_test': ["Forecast"],
         }
         roles = []
         for name in role_candiates[finance_statement]:
