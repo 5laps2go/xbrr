@@ -17,6 +17,9 @@ class Forecast(BaseParser):
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
             "dividend_correction_date": "tse-ed-t:ReportingDateOfDividendForecastCorrection",
 
+            "forecast_correction_flag": "tse-ed-t:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
+            "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
+
             "sales": "tse-ed-t:Sales",
             "sales_IFRS": "tse-ed-t:SalesIFRS"
         }
@@ -78,6 +81,12 @@ class Forecast(BaseParser):
         return 'FY'
 
     @property
+    def fc_q2ytd_period(self):
+        role = self.__find_role_name('fc_q2ytd')
+        if len(role) <= 0: return ''
+        return 'Q2'
+
+    @property
     def forecast_year(self):
         return 'NextYear' if self.fiscal_period_kind=='a' else 'CurrentYear'
 
@@ -99,6 +108,15 @@ class Forecast(BaseParser):
         fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(fc) if fc is not None else None
 
+    def q2ytd(self, ifrs=False, use_cal_link=True):
+        role = self.__find_role_name('q2ytd')
+        if len(role) <= 0: return None
+        role = role[0]
+        role_uri = self.reader.get_role(role).uri
+
+        q2ytd = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        return self.__filter_duplicate(q2ytd) if q2ytd is not None else None
+
     def __filter_duplicate(self, data):
         # Exclude dimension member
         data.drop_duplicates(subset=("name", "member","period"), keep="first",
@@ -107,9 +125,10 @@ class Forecast(BaseParser):
 
     def __find_role_name(self, finance_statement):
         role_candiates = {
-            'fc': ["RoleForecasts", "Forecasts", "InformationAnnual"],
-            'fc_dividends': ["RoleDividends", "RoleRevisedDividend"],
-            'fc_test': ["Forecast"],
+            'fc': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual"], #有価証券報告書,決算短信,業績予想の修正
+            'fc_dividends': ["RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],   #有価証券報告書,決算短信,配当予想の修正
+            'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],
+            'q2ytd': ["InformationQ2YTD"],
         }
         roles = []
         for name in role_candiates[finance_statement]:
