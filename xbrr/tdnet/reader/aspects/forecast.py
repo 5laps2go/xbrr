@@ -109,7 +109,7 @@ class Forecast(BaseParser):
         return self.__filter_duplicate(fc) if fc is not None else None
 
     def q2ytd(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('q2ytd')
+        role = self.__find_role_name('fc_q2ytd')
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
@@ -128,7 +128,7 @@ class Forecast(BaseParser):
             'fc': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual"], #有価証券報告書,決算短信,業績予想の修正
             'fc_dividends': ["RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],   #有価証券報告書,決算短信,配当予想の修正
             'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],
-            'q2ytd': ["InformationQ2YTD"],
+            'fc_q2ytd': ["InformationQ2YTD"],
         }
         roles = []
         for name in role_candiates[finance_statement]:
