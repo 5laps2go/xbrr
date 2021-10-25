@@ -40,7 +40,7 @@ class Forecast(BaseParser):
             super().__init__(reader, ElementValue, reit_tags)
 
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
-        title = self.document_name.value.translate(dic).replace(' ','')
+        title = self.document_name.value.translate(dic).strip().replace(' ','')
         m = re.match(r'(第(.)四半期|中間)?決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
             self.consolidated = '連結' == m.groups()[5]
@@ -48,6 +48,8 @@ class Forecast(BaseParser):
             self.accounting_standards = m.groups()[3]
         elif ('業績予想' in title or '配当予想' in title):
             self.fiscal_period_kind = '0'
+        else:
+            raise Exception("Unknown titile found!")
 
     @property
     def use_IFRS(self):
