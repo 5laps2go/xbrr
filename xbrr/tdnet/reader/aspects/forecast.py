@@ -41,7 +41,7 @@ class Forecast(BaseParser):
 
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
-        m = re.match(r'(第(.)四半期|中間)?決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
+        m = re.match(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
             self.consolidated = '連結' == m.groups()[5]
             self.fiscal_period_kind = 'a' if m.groups()[1]==None else m.groups()[1]
