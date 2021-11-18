@@ -1,6 +1,6 @@
 import os
 import importlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 from bs4 import BeautifulSoup
@@ -69,10 +69,17 @@ class Reader(BaseReader):
 
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
+        def fullyear_report_date(published_date:datetime, kind:str):
+            if kind != 'a':
+                duration = self.findv('jpdei_cor_TypeOfCurrentPeriodDEI')
+                if duration is not None:
+                    return published_date - timedelta(days=int(duration.value[1])*90), kind
+            return published_date, kind
         taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
         if len(taxonomy_prefixies) > 0:
             taxonomy_prefix = taxonomy_prefixies[0]
-            self.taxonomies[taxonomy_prefix].download(*self.xbrl_doc.published_date)
+            self.taxonomies[taxonomy_prefix].download(
+                *fullyear_report_date(*self.xbrl_doc.published_date))
 
         path = self._uri_to_path(uri)
         with open(path, encoding="utf-8-sig") as f:
