@@ -73,7 +73,8 @@ class Reader(BaseReader):
             if kind != 'a':
                 duration = self.findv('jpdei_cor_TypeOfCurrentPeriodDEI')
                 if duration is not None:
-                    return published_date - timedelta(days=int(duration.value[1])*90), kind
+                    q = int(duration.value[1]) if duration.value[1].isdigit() else 2 # second quater
+                    return published_date - timedelta(days=q*90), kind
             return published_date, kind
         taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
         if len(taxonomy_prefixies) > 0:
