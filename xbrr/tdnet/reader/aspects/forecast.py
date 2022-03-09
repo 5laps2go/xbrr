@@ -21,7 +21,8 @@ class Forecast(BaseParser):
             "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
 
             "sales": "tse-ed-t:Sales",
-            "sales_IFRS": "tse-ed-t:SalesIFRS"
+            "sales_IFRS": "tse-ed-t:SalesIFRS",
+            "netsales_IFRS": "tse-ed-t:NetSalesIFRS"
         }
         reit_tags = {
             "document_name": "tse-re-t:DocumentName",
@@ -32,7 +33,8 @@ class Forecast(BaseParser):
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
 
             "sales_REIT": "tse-re-t:OperatingRevenuesREIT",
-            "sales_IFRS": "tse-ed-t:SalesIFRS"
+            "sales_IFRS": "tse-ed-t:SalesIFRS",
+            "netsales_IFRS": "tse-ed-t:NetSalesIFRS"
         }
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
@@ -53,7 +55,7 @@ class Forecast(BaseParser):
 
     @property
     def use_IFRS(self):
-        return self.sales_IFRS.value is not None
+        return (self.sales_IFRS.value is not None) or (self.netsales_IFRS.value is not None)
     
     @property
     def reporting_date(self):
