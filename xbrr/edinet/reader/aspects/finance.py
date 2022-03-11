@@ -66,7 +66,7 @@ class Finance(BaseParser):
     def __find_role_name(self, finance_statement):
         role_candiates = {
             'bs': ["StatementOfFinancialPositionIFRS", "ConsolidatedBalanceSheet", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome"],
+            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome", "StatementOfComprehensiveIncomeSingleStatementIFRS"],
             'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
         }
         roles = []
