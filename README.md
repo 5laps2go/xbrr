@@ -13,7 +13,7 @@ Supported documents:
 
 * Japan
   * API: [EDINET](http://disclosure.edinet-fsa.go.jp/)
-  * Reader: Mainly supports annual reports disclosed on EDINET.
+  * Reader: Mainly supports annual reports disclosed on EDINET and TDNET
 * America
   * API: Comming soon
   * Reader: Comming soon
@@ -68,14 +68,14 @@ xbrl_dir = xbrr.edinet.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd(), ex
 Extract contents from XBRL.
 
 ```py
-xbrl = xbrr.edinet.reader.read("path/to/xbrl/file")
+xbrl = xbrr.xbrl.reader.read("path/to/xbrl/file")
 content = xbrl.extract(xbrr.edinet.aspects.Business).policy_environment_issue_etc.value
 ```
 
 Extract financial statements.
 
 ```py
-xbrl_dir = xbrr.edinet.reader.read("path/to/xbrl/dir")
+xbrl_dir = xbrr.xbrl.reader.read("path/to/xbrl/dir")
 xbrl_dir.extract(xbrr.edinet.aspects.Finance).bs.to_csv("bs.csv", index=False)
 ```
 
