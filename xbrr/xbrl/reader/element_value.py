@@ -1,5 +1,5 @@
 from xbrr.base.reader.base_element_value import BaseElementValue
-from xbrr.edinet.reader.element_schema import ElementSchema
+from xbrr.xbrl.reader.element_schema import ElementSchema
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 

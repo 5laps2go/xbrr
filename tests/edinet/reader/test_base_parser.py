@@ -1,9 +1,9 @@
 import os
 import re
 import unittest
-from xbrr.edinet.reader.reader import Reader
+from xbrr.xbrl.reader.reader import Reader
 from xbrr.base.reader.base_parser import BaseParser
-from xbrr.edinet.reader.element_value import ElementValue
+from xbrr.xbrl.reader.element_value import ElementValue
 import tests.edinet.reader.doc as testdoc
 
 

@@ -1,7 +1,7 @@
 import re
 import warnings
 from xbrr.base.reader.base_parser import BaseParser
-from xbrr.edinet.reader.element_value import ElementValue
+from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class Forecast(BaseParser):

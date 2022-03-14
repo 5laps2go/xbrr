@@ -8,10 +8,9 @@ if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 from xbrr.base.reader.base_reader import BaseReader
 from xbrr.edinet.reader.doc import Doc
-from xbrr.edinet.reader.taxonomy import Taxonomy
-from xbrr.edinet.reader.element_schema import ElementSchema
-from xbrr.edinet.reader.role_schema import RoleSchema
-from xbrr.edinet.reader.element_value import ElementValue
+from xbrr.xbrl.reader.element_schema import ElementSchema
+from xbrr.xbrl.reader.role_schema import RoleSchema
+from xbrr.xbrl.reader.element_value import ElementValue
 
 class Reader(BaseReader):
 

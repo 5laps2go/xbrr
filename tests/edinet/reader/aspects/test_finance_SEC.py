@@ -2,7 +2,7 @@ import os
 import shutil
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
-from xbrr.edinet.reader.reader import Reader
+from xbrr.xbrl.reader.reader import Reader
 from xbrr.edinet.reader.doc import Doc
 from xbrr.edinet.reader.aspects.finance import Finance
 

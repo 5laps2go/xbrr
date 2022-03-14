@@ -1,6 +1,6 @@
 import os
 import unittest
-from xbrr.edinet.reader.reader import Reader
+from xbrr.xbrl.reader.reader import Reader
 from xbrr.edinet.reader.aspects.metadata import Metadata
 import tests.edinet.reader.doc as testdoc
 

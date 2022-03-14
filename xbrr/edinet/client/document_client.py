@@ -45,7 +45,7 @@ class DocumentClient(BaseClient):
             error = ErrorResponse.create(r.json())
             error.raise_for_status(r)
         elif r.headers["content-type"].startswith("text/html"):
-            error = ErrorResponse.create(r.text)
+            error = ErrorResponse(r.ok, r.text)
             error.raise_for_status(r)
         else:
             _file_name = file_name

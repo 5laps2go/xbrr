@@ -2,7 +2,7 @@ import os
 import shutil
 import unittest
 from xbrr.tdnet.client.document_client import DocumentClient
-from xbrr.edinet.reader.reader import Reader
+from xbrr.xbrl.reader.reader import Reader
 from xbrr.tdnet.reader.doc import Doc
 from xbrr.tdnet.reader.aspects.forecast import Forecast
 
