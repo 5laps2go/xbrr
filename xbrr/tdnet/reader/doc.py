@@ -88,6 +88,21 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
+    @property
+    def company_code(self) -> str:
+        if 'Attachment' in self.file_spec:
+            # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
+            #             0  1          2     3   4  5  6   7   8  9
+            v = os.path.basename(self.file_spec).split('-')
+            return v[2]
+        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
+            # Summary/tse-acedjpsm-36450-20210714336450
+            #          0      1       2         3 
+            v = os.path.basename(self.file_spec).split('-')
+            return v[2]
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+
     def create_taxonomies(self, root_dir) -> Dict[str, object]:
         if 'Attachment' in self.file_spec:
             etxnmy = EdinetTaxonomy(root_dir)

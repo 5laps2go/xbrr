@@ -25,6 +25,10 @@ class BaseDoc():
         raise NotImplementedError("You have to implement published_date.")
     
     @property
+    def company_code(self):
+        raise NotImplementedError("You have to implement company_code.")
+    
+    @property
     def default_linkbase(self):
         raise NotImplementedError("You have to implement default_linkbase.")
         

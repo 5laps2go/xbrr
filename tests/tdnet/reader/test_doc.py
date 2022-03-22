@@ -1,4 +1,5 @@
 import os
+import datetime
 import unittest
 from xbrr.tdnet.reader.doc import Doc
 
@@ -16,6 +17,10 @@ class TestDoc(unittest.TestCase):
 
     def test_doc(self):
         doc = Doc(root_dir=self.root_dir, xbrl_kind="public")
+
+        self.assertEqual(doc.published_date[0], datetime.datetime(2021, 7, 14, 0, 0))
+        self.assertEqual(doc.published_date[1], 'a')
+        self.assertEqual(doc.company_code, '36450')
 
         self.assertGreater(len(doc.xsd.find_all("element")), 0)
         self.assertGreater(len(doc.cal.find_all("calculationLink")), 0)

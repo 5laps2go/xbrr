@@ -1,5 +1,6 @@
 import os
 import shutil
+import datetime
 import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.doc import Doc
@@ -21,6 +22,10 @@ class TestDoc(unittest.TestCase):
 
     def test_doc(self):
         doc = self.doc
+
+        self.assertEqual(doc.published_date[0], datetime.datetime(2019, 3, 27, 0, 0))
+        self.assertEqual(doc.published_date[1], 'a')
+        self.assertEqual(doc.company_code, 'E01726')
 
         self.assertGreater(len(doc.xsd.find_all("element")), 0)
         self.assertGreater(len(doc.cal.find_all("calculationLink")), 0)

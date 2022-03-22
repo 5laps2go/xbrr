@@ -68,6 +68,21 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
+    @property
+    def company_code(self) -> str:
+        if 'PublicDoc' in self.file_spec:
+            # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
+            #  split by '_'           0         1           2      3     4
+            v1 = os.path.basename(self.file_spec).split('_')
+            return v1[1][0:6]
+        elif 'AuditDoc' in self.file_spec:
+            # AuditDoc/jpaud-aar-cn-001_E00883-000_2020-12-31_01_2021-03-26
+            # split by '_'       0
+            v1 = os.path.basename(self.file_spec).split('_')
+            return v1[1][0:6]
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+
     def create_taxonomies(self, root_dir) -> Dict[str, object]:
         etxnmy = EdinetTaxonomy(root_dir)
         return {etxnmy.prefix: etxnmy}
