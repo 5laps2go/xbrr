@@ -29,7 +29,8 @@ class Taxonomy(BaseTaxonomy):
 
     def download(self, published_date:datetime, kind:str):
         year = str(self.taxonomy_year(published_date, kind))
-        expand_dir = self.root.joinpath("taxonomy").joinpath(year)
+        expand_dir = self.root.joinpath("taxonomy").joinpath("edinet")
+        marker_dir = self.root.joinpath("taxonomy").joinpath(year)
         self.path = expand_dir
         taxonomy_file = self.root.joinpath(f"{year}_taxonomy.zip")
 
@@ -39,8 +40,8 @@ class Taxonomy(BaseTaxonomy):
             self.root.mkdir(parents=True, exist_ok=True)
             download = True
 
-        if not expand_dir.exists():
-            expand_dir.mkdir(parents=True, exist_ok=True)
+        if not marker_dir.exists():
+            marker_dir.mkdir(parents=True, exist_ok=True)
             download = True
 
         if download:
