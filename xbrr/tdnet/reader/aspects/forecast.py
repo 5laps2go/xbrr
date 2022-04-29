@@ -50,6 +50,8 @@ class Forecast(BaseParser):
             self.accounting_standards = m.groups()[3]
         elif ('業績予想' in title or '配当予想' in title):
             self.fiscal_period_kind = '0'
+        elif ('剰余金の配当' in title):
+            self.fiscal_period_kind = '0'
         else:
             raise Exception("Unknown titile found!")
 
