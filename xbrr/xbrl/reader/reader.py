@@ -59,7 +59,8 @@ class Reader(BaseReader):
             self._xsd_dic.update(ElementSchema.read_schema(self, xsduri))
             # prepare label xml href dict from local xsd
             ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
-        return self._xsd_dic[element]
+        return self._xsd_dic[element] if element in self._xsd_dic\
+             else ElementSchema(name=element, reference=link) # avoid reference error
 
     def get_role(self, role_name) -> RoleSchema:
         if '/' in role_name:
