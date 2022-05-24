@@ -52,6 +52,8 @@ class Forecast(BaseParser):
             self.fiscal_period_kind = '0'
         elif ('剰余金の配当' in title):
             self.fiscal_period_kind = '0'
+        elif ('業績' in title):
+            self.fiscal_period_kind = '0'
         else:
             raise Exception("Unknown titile found!")
 
