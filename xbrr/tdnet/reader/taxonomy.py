@@ -7,7 +7,7 @@ from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Taxonomy(BaseTaxonomy):
     TAXONOMIES = {
-        "2014": "https://www.jpx.co.jp/equities/listing/xbrl/tvdivq00000088ai-att/61_taxonomy.zip",
+        "2014": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/61_taxonomy.zip",
     }
 
     def __init__(self, taxonomy_root):
