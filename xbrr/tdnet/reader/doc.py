@@ -8,6 +8,7 @@ from xbrr.tdnet.reader.taxonomy import Taxonomy as TdnetTaxonomy
 import subprocess
 from subprocess import PIPE
 from typing import Tuple, Dict
+from bs4 import BeautifulSoup
 
 class Doc(XbrlDoc):
 
@@ -121,10 +122,16 @@ class Doc(XbrlDoc):
         xsl_file = "/usr/local/share/inlinexbrl/processor/Main_exslt.xsl"
 
         self.file_spec = os.path.splitext(xsd_file)[0]
-        ixbrl_file = self.file_spec+"-ixbrl.htm"
         manifest_file = self.find_path('man')
-        infile = manifest_file if os.path.isfile(manifest_file) else ixbrl_file
-        xbrl_file = self.file_spec + ".xbrl"
+        if os.path.isfile(manifest_file):
+            infile = manifest_file
+            with open(manifest_file, encoding="utf-8-sig") as f:
+                manifest_xml = BeautifulSoup(f, "lxml-xml")
+            xbrl_file = os.path.join(os.path.dirname(self.file_spec),
+                                    manifest_xml.find('instance')['preferredFilename'])
+        else:
+            infile = self.file_spec+"-ixbrl.htm"
+            xbrl_file = self.file_spec + ".xbrl"
 
         command = "xsltproc -o %s %s %s" % (xbrl_file, xsl_file, infile)
         proc = subprocess.run(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
