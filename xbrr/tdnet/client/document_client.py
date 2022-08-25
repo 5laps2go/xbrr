@@ -11,12 +11,12 @@ class DocumentClient():
 
     BASE_URL = "https://www.release.tdnet.info/inbs/{}"
 
-    def __init__(self):
-        pass
+    def __init__(self, base_url=BASE_URL):
+        self.base_url = base_url
 
     @property
     def endpoint(self):
-        return self.BASE_URL
+        return self.base_url
 
     def get(self, document_id: str,
             save_dir: str = "") -> str:
