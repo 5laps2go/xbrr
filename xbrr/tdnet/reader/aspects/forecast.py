@@ -1,5 +1,6 @@
 import re
 import warnings
+from datetime import datetime
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.xbrl.reader.element_value import ElementValue
 
@@ -13,6 +14,7 @@ class Forecast(BaseParser):
             "company_name": "tse-ed-t:CompanyName",
             "company_name_en": "jpdei_cor:FilerNameInEnglishDEI",
 
+            "fiscal_date_end": "tse-ed-t:FiscalYearEnd",
             "filling_date": "tse-ed-t:FilingDate",
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
             "dividend_correction_date": "tse-ed-t:ReportingDateOfDividendForecastCorrection",
@@ -88,6 +90,12 @@ class Forecast(BaseParser):
         role = self.__find_role_name('fc_test')
         if len(role) <= 0: return 'Q2'
         return 'FY'
+
+    @property
+    def fiscal_year_end_date(self):
+        value = self.get_value("fiscal_date_end")
+        date = datetime.strptime(value.value, "%Y-%m-%d") if value.value else None
+        return ElementValue('fiscal_year_end_date', value=date)
 
     @property
     def fc_q2ytd_period(self):
