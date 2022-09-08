@@ -45,9 +45,10 @@ class Forecast(BaseParser):
         title = self.document_name.value.translate(dic).strip().replace(' ','')
         m = re.match(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
-            self.consolidated = '連結' == m.groups()[5]
-            self.fiscal_period_kind = 'a' if m.groups()[1]==None else m.groups()[1]
-            self.accounting_standards = m.groups()[3]
+            self.consolidated = '連結' == m.group(6)
+            quoater = '2' if m.group(1)is not None and m.group(2) is None else m.group(2)
+            self.fiscal_period_kind = 'FY' if m.group(1) is None else 'Q' + quoater
+            self.accounting_standards = m.group(4)
         elif ('業績予想' in title or '配当予想' in title):
             self.fiscal_period_kind = '0'
         elif ('剰余金の配当' in title):
@@ -96,7 +97,7 @@ class Forecast(BaseParser):
 
     @property
     def forecast_year(self):
-        return 'NextYear' if self.fiscal_period_kind=='a' else 'CurrentYear'
+        return 'NextYear' if self.fiscal_period_kind=='FY' else 'CurrentYear'
 
     def fc(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('fc')
