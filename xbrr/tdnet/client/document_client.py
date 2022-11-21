@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 from zipfile import ZipFile
 import requests
-from xbrr.edinet.models.error_response import ErrorResponse
+from xbrr.xbrl.models.error_response import ErrorResponse
 
 
 class DocumentClient():
@@ -18,8 +18,7 @@ class DocumentClient():
     def endpoint(self):
         return self.base_url
 
-    def get(self, document_id: str,
-            save_dir: str = "") -> str:
+    def get(self, document_id: str, save_dir: str = "") -> Path:
         """Get file of document_id and save it to save_dir/file_name.
 
         Arguments:
@@ -37,27 +36,27 @@ class DocumentClient():
 
         if not r.ok:
             r.raise_for_status()
+
+        _file_name = document_id
+        chunk_size = 1024
+        if save_dir:
+            save_path = Path(save_dir).joinpath(_file_name)
         else:
-            _file_name = document_id
-            chunk_size = 1024
-            if save_dir:
-                save_path = Path(save_dir).joinpath(_file_name)
-            else:
-                _file_name = Path(_file_name)
-                tmpf = tempfile.NamedTemporaryFile(
-                        prefix=_file_name.stem + "__",
-                        suffix=_file_name.suffix,
-                        delete=False)
-                save_path = Path(tmpf.name)
+            _file_name = Path(_file_name)
+            tmpf = tempfile.NamedTemporaryFile(
+                    prefix=_file_name.stem + "__",
+                    suffix=_file_name.suffix,
+                    delete=False)
+            save_path = Path(tmpf.name)
 
-            with save_path.open(mode="wb") as f:
-                for chunk in r.iter_content(chunk_size):
-                    f.write(chunk)
+        with save_path.open(mode="wb") as f:
+            for chunk in r.iter_content(chunk_size):
+                f.write(chunk)
 
-            return save_path
+        return save_path
 
     def get_pdf(self, document_id: str,
-                save_dir: str = "", file_name: str = "") -> str:
+                save_dir: str = "", file_name: str = "") -> Path:
         """Get PDF file.
 
         Arguments:
@@ -74,7 +73,7 @@ class DocumentClient():
 
     def get_xbrl(self, document_id: str,
                  save_dir: str = "",
-                 expand_level: str = "dir"):
+                 expand_level: str = "dir") -> Path:
         """Get XBRL file.
 
         Arguments:

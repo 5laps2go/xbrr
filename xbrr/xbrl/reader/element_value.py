@@ -9,7 +9,7 @@ class ElementValue(BaseElementValue):
     def __init__(self, name="", reference="",
                  value="", unit="", decimals="",
                  context_ref={},
-                 lazy_schema=None):
+                 lazy_schema=lambda:ElementSchema()):
         super().__init__()
         self.name = name
         self.reference = reference
@@ -62,6 +62,7 @@ class ElementValue(BaseElementValue):
         xsduri = reader.xbrl_doc.find_xsduri(xml_el.namespace)
         reference = f"{xsduri}#{xml_el.prefix}_{xml_el.name}"
 
+        context_ref = {}
         if "contextRef" in xml_el.attrs:
             context_id = xml_el["contextRef"]
             context_ref = context_dic[context_id]

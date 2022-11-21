@@ -1,3 +1,5 @@
+from pathlib import Path
+
 class BaseDoc():
     """
     Submitted Document base class
@@ -8,16 +10,16 @@ class BaseDoc():
         self.root_dir = root_dir
         self.xbrl_file = xbrl_file
     
-    def find_path(self, kind):
+    def find_path(self, kind: str):
         raise NotImplementedError("You have to implement find_path method.")
 
-    def read_file(self, kind):
+    def read_file(self, kind: str):
         raise NotImplementedError("You have to implement read_file method.")
 
-    def find_xsduri(self, namespace):
+    def find_xsduri(self, namespace: str):
         raise NotImplementedError("You have to implement find_xsduri method.")
 
-    def create_taxonomies(self, root_dir):
+    def create_taxonomies(self, root_dir: Path):
         raise NotImplementedError("You have to implement create_taxonomies method.")
 
     @property

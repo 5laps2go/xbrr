@@ -1,20 +1,20 @@
 import os
-import importlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 from bs4 import BeautifulSoup
+import importlib.util
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 from xbrr.base.reader.base_reader import BaseReader
-from xbrr.edinet.reader.doc import Doc
+from xbrr.base.reader.xbrl_doc import XbrlDoc
 from xbrr.xbrl.reader.element_schema import ElementSchema
 from xbrr.xbrl.reader.role_schema import RoleSchema
 from xbrr.xbrl.reader.element_value import ElementValue
 
 class Reader(BaseReader):
 
-    def __init__(self, xbrl_doc: Doc, taxonomy=None, save_dir: str = ""):
+    def __init__(self, xbrl_doc: XbrlDoc, save_dir: str = ""):
         super().__init__("edinet")
         self.xbrl_doc = xbrl_doc
         self.save_dir = save_dir
@@ -28,7 +28,7 @@ class Reader(BaseReader):
         self.taxonomies = self.xbrl_doc.create_taxonomies(root)
 
     def __reduce_ex__(self, proto):
-        return type(self), (self.xbrl_doc, self.taxonomy)
+        return type(self), (self.xbrl_doc, self.taxonomies)
 
     @property
     def custom_roles(self):

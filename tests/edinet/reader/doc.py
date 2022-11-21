@@ -1,9 +1,9 @@
 import os
-from xbrr.base.reader.base_doc import BaseDoc
+from xbrr.base.reader.xbrl_doc import XbrlDoc
 from bs4 import BeautifulSoup
 import re
 
-class Doc(BaseDoc):
+class Doc(XbrlDoc):
     """
     Doc for test to provide single xbrl file
     """

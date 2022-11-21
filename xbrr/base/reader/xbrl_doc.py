@@ -25,8 +25,8 @@ class XbrlDoc(BaseDoc):
                 href_list.append((ref['xlink:href'], linkrole))
             return href_list
         xsd_xml = self.xsd
-        self._schema_dic = read_schemaRefs(xsd_xml)
-        self._linkbase_tuples = read_linkbaseRefs(xsd_xml)
+        self._schema_dic = read_schemaRefs(xsd_xml) if xsd_xml is not None else None
+        self._linkbase_tuples = read_linkbaseRefs(xsd_xml) if xsd_xml is not None else None
 
     def read_file(self, kind):
         path = self.find_path(kind)
@@ -69,4 +69,5 @@ class XbrlDoc(BaseDoc):
         for pair in self._linkbase_tuples:
             if pair[0].startswith(ns_base) and pair[0].endswith(kind+".xml"):
                 return pair[0]
-        return None
+
+        raise Exception(f"linkbase ref does not exist.")

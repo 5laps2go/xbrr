@@ -19,7 +19,7 @@ class Taxonomy(BaseTaxonomy):
         "2022": "https://www.fsa.go.jp/search/20211109/1c_Taxonomy.zip"
     }
 
-    def __init__(self, taxonomy_root):
+    def __init__(self, taxonomy_root: Path):
         super().__init__(
             root=taxonomy_root,
             prefix="http://disclosure.edinet-fsa.go.jp/taxonomy/")

@@ -7,8 +7,8 @@ from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
 from xbrr.tdnet.reader.taxonomy import Taxonomy as TdnetTaxonomy
 import subprocess
 from subprocess import PIPE
-from typing import Tuple, Dict
 from bs4 import BeautifulSoup
+from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Doc(XbrlDoc):
 
@@ -42,7 +42,7 @@ class Doc(XbrlDoc):
         if kind == "man":
             path = os.path.join(os.path.dirname(self.file_spec), "manifest.xml")
             if len(path)==0:
-                return None
+                raise Exception(f"manifest file does not exist.")
         elif kind in suffix:
             path = self.file_spec + suffix[kind]
         else: # kind=file name case
@@ -71,7 +71,7 @@ class Doc(XbrlDoc):
         }
 
     @property
-    def published_date(self) -> Tuple[datetime, str]:
+    def published_date(self) -> tuple[datetime, str]:
         if 'Attachment' in self.file_spec:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
             #             0  1          2     3   4  5  6   7   8  9
@@ -104,7 +104,7 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
-    def create_taxonomies(self, root_dir) -> Dict[str, object]:
+    def create_taxonomies(self, root_dir) -> dict[str, BaseTaxonomy]:
         if 'Attachment' in self.file_spec:
             etxnmy = EdinetTaxonomy(root_dir)
             ttxnmy = TdnetTaxonomy(root_dir)
@@ -127,8 +127,8 @@ class Doc(XbrlDoc):
             infile = manifest_file
             with open(manifest_file, encoding="utf-8-sig") as f:
                 manifest_xml = BeautifulSoup(f, "lxml-xml")
-            xbrl_file = os.path.join(os.path.dirname(self.file_spec),
-                                    manifest_xml.find('instance')['preferredFilename'])
+            xbrl_file = os.path.join(os.path.dirname(self.file_spec),  # type: ignore
+                                    manifest_xml.find('instance')['preferredFilename'])  # type: ignore
         else:
             infile = self.file_spec+"-ixbrl.htm"
             xbrl_file = self.file_spec + ".xbrl"

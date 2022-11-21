@@ -1,14 +1,15 @@
 from datetime import datetime
+from pathlib import Path
 
 class BaseTaxonomy():
     """
     Taxonomy base class
     """
 
-    def __init__(self, root="", prefix=""):
+    def __init__(self, root: Path, prefix: str = ""):
         self.root = root
         self.prefix = prefix
-        self.path = None
+        self.path: Path
     
     def download(self, published_date:datetime, kind:str):
         raise NotImplementedError("You have to implement download method.")

@@ -30,7 +30,7 @@ class ElementSchema(BaseElementSchema):
         return self
 
     @classmethod
-    def create_from_reference(cls, reader, reference):
+    def create_from_reference(cls, reader, reference) -> 'ElementSchema':
         if not reader.xbrl_doc.has_schema: # for test purpose only
             name = reference.split("#")[-1]
             instance = cls(name=name, reference=reference)
@@ -68,7 +68,7 @@ class ElementSchema(BaseElementSchema):
                 assert 'xlink:href' in attrs and 'xlink:label' in attrs
                 # href  = jpcrp040300-q1r-001_E04251-000_2016-06-30_01_2016-08-12.xsd#jpcrp040300-q1r_E04251-000_ProvisionForLossOnCancellationOfContractEL
                 # label = ProvisionForLossOnCancellationOfContractEL
-                v = elem['xlink:href'].split('#')
+                v = elem['xlink:href'].split('#')  # type: ignore
                 assert len(v) == 2
                 loc_dic[elem['xlink:label']] = v[1]
 

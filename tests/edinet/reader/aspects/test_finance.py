@@ -16,7 +16,7 @@ class TestFinance(unittest.TestCase):
         client = DocumentClient()
         root_dir = client.get_xbrl("S100LOZE", save_dir=_dir,
                                     expand_level="dir")
-        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
+        xbrl_doc = Doc(root_dir=str(root_dir), xbrl_kind="public")
         cls.reader = Reader(xbrl_doc, save_dir=_dir)
         cls._dir = _dir
 

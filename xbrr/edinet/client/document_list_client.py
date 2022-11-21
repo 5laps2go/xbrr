@@ -3,6 +3,7 @@ from datetime import datetime
 import requests
 from xbrr.edinet.client.base_client import BaseClient
 from xbrr.edinet.models import MetaData, Documents
+from typing import Dict
 
 
 class BaseDocumentListClient(BaseClient):
@@ -16,7 +17,7 @@ class BaseDocumentListClient(BaseClient):
         super().__init__(target="documents.json")
         self.response_type = response_type
 
-    def _get(self, date: Union[str, datetime]) -> dict:
+    def _get(self, date: Union[str, datetime]) -> Dict:
         """Get Document List API response.
 
         Arguments:
@@ -36,7 +37,7 @@ class BaseDocumentListClient(BaseClient):
             except ValueError:
                 raise Exception("Date format should be yyyy-mm-dd.")
 
-        _date = _date.strftime("%Y-%m-%d")
+        _date = _date.strftime("%Y-%m-%d")  # type: ignore
 
         params = {
             "date": _date,
@@ -47,9 +48,9 @@ class BaseDocumentListClient(BaseClient):
 
         if not r.ok:
             r.raise_for_status()
-        else:
-            body = r.json()
-            return body
+
+        body = r.json()
+        return body
 
 
 class MetaDataClient(BaseDocumentListClient):

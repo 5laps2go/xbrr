@@ -3,7 +3,7 @@ import glob
 from datetime import datetime
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
-from typing import Tuple, Dict
+from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Doc(XbrlDoc):
 
@@ -31,7 +31,7 @@ class Doc(XbrlDoc):
         if kind == "man":
             manifest = glob.glob(os.path.join(os.path.dirname(self.file_spec), "manifest_*.xml"))
             if len(manifest)==0:
-                return None
+                raise Exception(f"manifest file does not exist.")
             path = manifest[0]
         elif kind in suffix:
             path = self.file_spec + suffix[kind]
@@ -41,7 +41,7 @@ class Doc(XbrlDoc):
         return path
 
     @property
-    def default_linkbase(self) -> dict:
+    def default_linkbase(self) -> dict[str, str]:
         return {
             'doc': self.pre,
             'link_node': 'link:presentationLink',
@@ -51,7 +51,7 @@ class Doc(XbrlDoc):
         }
 
     @property
-    def published_date(self) -> Tuple[datetime, str]:
+    def published_date(self) -> tuple[datetime, str]:
         if 'PublicDoc' in self.file_spec:
             # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
             #  split by '_'           0         1           2      3     4
@@ -83,6 +83,6 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
-    def create_taxonomies(self, root_dir) -> Dict[str, object]:
+    def create_taxonomies(self, root_dir) -> dict[str, BaseTaxonomy]:
         etxnmy = EdinetTaxonomy(root_dir)
         return {etxnmy.prefix: etxnmy}

@@ -1,25 +1,24 @@
 from xbrr.base.reader.base_element_schema import BaseElementSchema
-import bs4
+from typing import Callable
 
 class RoleSchema(BaseElementSchema):
 
-    def __init__(self,
-                 uri="", href="", lazy_label=None):
+    def __init__(self, uri: str, href: str, lazy_label: Callable[[str],str]):
         super().__init__()
         self.uri = uri
         self.href = href
         self.lazy_label=lazy_label
-        self._label = None
+        self._label: str = ''
     
     @property
     def label(self):
-        if self._label is None:
+        if self._label == '':
             xsduri = self.href.split('#')[0]
             self.lazy_label(xsduri)
         return self._label
 
     @classmethod
-    def read_role_ref(cls, reader, xml, link_node, base_xsduri = None):
+    def read_role_ref(cls, reader, xml, link_node, base_xsduri = None) -> dict[str,'RoleSchema']:
         link_node_roles = [x["xlink:role"].rsplit("/")[-1] for x in xml.find_all(link_node)]
         role_dic = {}
         for element in xml.find_all('roleRef'):
@@ -35,7 +34,7 @@ class RoleSchema(BaseElementSchema):
         return role_dic
 
     @classmethod
-    def read_schema(cls, reader, xsduri):
+    def read_schema(cls, reader, xsduri) -> str:
         xml = reader.read_uri(xsduri)
         for element in xml.find_all("link:roleType"):
             # accounting standard='jp':     EDINET/taxonomy/2020-11-01/taxonomy/jppfs/2020-11-01/jppfs_rt_2020-11-01.xsd
@@ -46,6 +45,7 @@ class RoleSchema(BaseElementSchema):
             if element["id"] not in reader._role_dic:
                 continue
             reader._role_dic[element["id"]]._label = element.find("link:definition").text
+        raise ValueError(f'schema:{xsduri} does not found')
 
     def to_dict(self):
         return {

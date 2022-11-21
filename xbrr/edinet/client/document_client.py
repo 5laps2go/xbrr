@@ -4,7 +4,7 @@ import tempfile
 from zipfile import ZipFile
 import requests
 from xbrr.edinet.client.base_client import BaseClient
-from xbrr.edinet.models.error_response import ErrorResponse
+from xbrr.xbrl.models.error_response import ErrorResponse
 
 
 class DocumentClient(BaseClient):
@@ -14,7 +14,7 @@ class DocumentClient(BaseClient):
         super().__init__(target="documents/{}")
 
     def get(self, document_id: str, response_type: str,
-            save_dir: str = "", file_name: str = "") -> str:
+            save_dir: str = "", file_name: str = "") -> Path:
         """Get file of document_id and save it to save_dir/file_name.
 
         Arguments:
@@ -45,40 +45,40 @@ class DocumentClient(BaseClient):
             error = ErrorResponse.create(r.json())
             error.raise_for_status(r)
         elif r.headers["content-type"].startswith("text/html"):
-            error = ErrorResponse(r.ok, r.text)
+            error = ErrorResponse(str(r.status_code), r.text)
             error.raise_for_status(r)
-        else:
-            _file_name = file_name
+
+        _file_name = file_name
+        if not _file_name:
+            if "content-disposition" in r.headers:
+                d = r.headers["content-disposition"]
+                file_names = re.findall("filename=\"(.+)\"", d)
+                if len(file_names) > 0:
+                    _file_name = file_names[0]
+
             if not _file_name:
-                if "content-disposition" in r.headers:
-                    d = r.headers["content-disposition"]
-                    file_names = re.findall("filename=\"(.+)\"", d)
-                    if len(file_names) > 0:
-                        _file_name = file_names[0]
+                ext = ".pdf" if response_type == "2" else ".zip"
+                _file_name = document_id + ext
 
-                if not _file_name:
-                    ext = ".pdf" if response_type == "2" else ".zip"
-                    _file_name = document_id + ext
+        chunk_size = 1024
+        if save_dir:
+            save_path = Path(save_dir).joinpath(_file_name)
+        else:
+            _file_name = Path(_file_name)
+            tmpf = tempfile.NamedTemporaryFile(
+                    prefix=_file_name.stem + "__",
+                    suffix=_file_name.suffix,
+                    delete=False)
+            save_path = Path(tmpf.name)
 
-            chunk_size = 1024
-            if save_dir:
-                save_path = Path(save_dir).joinpath(_file_name)
-            else:
-                _file_name = Path(_file_name)
-                tmpf = tempfile.NamedTemporaryFile(
-                        prefix=_file_name.stem + "__",
-                        suffix=_file_name.suffix,
-                        delete=False)
-                save_path = Path(tmpf.name)
+        with save_path.open(mode="wb") as f:
+            for chunk in r.iter_content(chunk_size):
+                f.write(chunk)
 
-            with save_path.open(mode="wb") as f:
-                for chunk in r.iter_content(chunk_size):
-                    f.write(chunk)
-
-            return save_path
+        return save_path
 
     def get_pdf(self, document_id: str,
-                save_dir: str = "", file_name: str = "") -> str:
+                save_dir: str = "", file_name: str = "") -> Path:
         """Get PDF file.
 
         Arguments:
@@ -97,7 +97,7 @@ class DocumentClient(BaseClient):
 
     def get_xbrl(self, document_id: str,
                  save_dir: str = "", file_name: str = "", lang: str = "ja",
-                 expand_level: str = "file"):
+                 expand_level: str = "file") -> Path:
         """Get XBRL file.
 
         Arguments:
@@ -162,7 +162,7 @@ class DocumentClient(BaseClient):
     def get_xbrl_dir(self, document_id: str,
                      save_dir: str = "",
                      file_name: str = "",
-                     lang: str = "ja"):
+                     lang: str = "ja") -> Path:
         return self.get_xbrl(
                 document_id=document_id,
                 save_dir=save_dir,
