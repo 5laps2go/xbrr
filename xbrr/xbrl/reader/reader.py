@@ -11,24 +11,25 @@ from xbrr.base.reader.xbrl_doc import XbrlDoc
 from xbrr.xbrl.reader.element_schema import ElementSchema
 from xbrr.xbrl.reader.role_schema import RoleSchema
 from xbrr.xbrl.reader.element_value import ElementValue
+from xbrr.xbrl.reader.taxonomy_repository import TaxonomyRepository
 
 class Reader(BaseReader):
 
-    def __init__(self, xbrl_doc: XbrlDoc, save_dir: str = ""):
+    def __init__(self, xbrl_doc: XbrlDoc, taxonomy_repo=None, save_dir: str = ""):
         super().__init__("edinet")
         self.xbrl_doc = xbrl_doc
+        self.taxonomy_repo = taxonomy_repo if taxonomy_repo is not None\
+            else TaxonomyRepository(save_dir)
         self.save_dir = save_dir
-        self._xsd_dic = {}
         self._role_dic = {}
         self._context_dic, self._value_dic, self._namespace_dic =\
             ElementValue.read_xbrl_values(self, self.xbrl)
 
-        root = Path(self.save_dir).joinpath("external")
-        self.taxonomies_root = root
-        self.taxonomies = self.xbrl_doc.create_taxonomies(root)
+        self.taxonomy_families = self.get_taxonomy_families()
+        self._xsd_dic = self.taxonomy_repo.get_schema_dict(self.taxonomy_families)
 
     def __reduce_ex__(self, proto):
-        return type(self), (self.xbrl_doc, self.taxonomies)
+        return type(self), (self.xbrl_doc, self.taxonomy_repo, )
 
     @property
     def custom_roles(self):
@@ -36,12 +37,6 @@ class Reader(BaseReader):
             linkbase = self.xbrl_doc.default_linkbase
             self._role_dic.update(RoleSchema.read_role_ref(self, linkbase['doc'], linkbase['link_node']))
         return self._role_dic
-
-    @property
-    def taxonomy_year(self):
-        return list(map(
-            lambda x: x.taxonomy_year(*self.xbrl_doc.published_date),
-            self.taxonomies.values()))
 
     @property
     def namespaces(self):
@@ -69,23 +64,24 @@ class Reader(BaseReader):
 
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
-        def fullyear_report_date(published_date:datetime, kind:str):
-            if kind != 'a':
-                duration = self.findv('jpdei_cor_TypeOfCurrentPeriodDEI')
-                if duration is not None:
-                    q = int(duration.value[1]) if duration.value[1].isdigit() else 2 # second quater
-                    return published_date - timedelta(days=q*90), kind
-            return published_date, kind
-        taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
-        if len(taxonomy_prefixies) > 0:
-            taxonomy_prefix = taxonomy_prefixies[0]
-            self.taxonomies[taxonomy_prefix].download(
-                *fullyear_report_date(*self.xbrl_doc.published_date))
+        self.taxonomy_repo.provision(uri, self.taxonomy_families)
 
         path = self._uri_to_path(uri)
         with open(path, encoding="utf-8-sig") as f:
             xml = BeautifulSoup(f, "lxml-xml")
         return xml
+    
+    def get_taxonomy_families(self) -> list[str]:
+        def fullyear_report_date(published_date:datetime, kind:str):
+            if kind != 'a':
+                duration = self.findv('jpdei_cor_TypeOfCurrentPeriodDEI')
+                if duration is not None:
+                    q = int(duration.value[1]) if duration.value[1].isdigit() else 2 # second quater
+                    return published_date - timedelta(days=q*90)
+            return published_date
+
+        report_date = fullyear_report_date(*self.xbrl_doc.published_date)
+        return self.taxonomy_repo.get_family_versions(report_date)
 
     def read_label_of_xsd(self, xsduri:str) -> BeautifulSoup:
         "read label linkbase content specified by xsd uri"
@@ -93,10 +89,9 @@ class Reader(BaseReader):
         return self.read_uri(laburi)
 
     def _uri_to_path(self, uri:str) -> str:
-        taxonomy_prefixies = [x for x in self.taxonomies if uri.startswith(x)]
-        if self.taxonomies and len(taxonomy_prefixies) > 0:
-            taxonomy_prefix = taxonomy_prefixies[0]
-            path = os.path.join(self.taxonomies[taxonomy_prefix].path, uri.replace(taxonomy_prefix, ""))
+        paths = self.taxonomy_repo.uri_to_path(uri)
+        if len(paths) > 0:
+            path = paths[0]
         else: # for local uri
             path = self.xbrl_doc.find_path(uri)
         return path
@@ -115,7 +110,7 @@ class Reader(BaseReader):
     def make_node_tree(self, nodes, role_name, doc, link_node, arc_node, arc_role):
         role = doc.find(link_node, {"xlink:role": self.get_role(role_name).uri})
         if role is None:
-            return []
+            return
 
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]

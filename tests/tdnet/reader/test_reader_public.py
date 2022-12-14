@@ -23,8 +23,8 @@ class TestReader(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         # shutil.rmtree(cls.reader.xbrl_doc.root_dir)
-        if os.path.exists(cls.reader.taxonomies_root):
-            shutil.rmtree(cls.reader.taxonomies_root)
+        if os.path.exists(cls.reader.taxonomy_repo.taxonomies_root):
+            shutil.rmtree(cls.reader.taxonomy_repo.taxonomies_root)
 
     def test_custom_roles(self):
         roles = self.reader.custom_roles

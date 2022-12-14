@@ -1,4 +1,6 @@
-from pathlib import Path
+from datetime import datetime
+from xbrr.base.reader.base_taxonomy import BaseTaxonomy
+from bs4 import BeautifulSoup
 
 class BaseDoc():
     """
@@ -10,62 +12,62 @@ class BaseDoc():
         self.root_dir = root_dir
         self.xbrl_file = xbrl_file
     
-    def find_path(self, kind: str):
+    def find_path(self, kind: str) -> str:
         raise NotImplementedError("You have to implement find_path method.")
 
-    def read_file(self, kind: str):
+    def read_file(self, kind: str) -> BeautifulSoup:
         raise NotImplementedError("You have to implement read_file method.")
 
-    def find_xsduri(self, namespace: str):
+    def find_xsduri(self, namespace: str) -> str:
         raise NotImplementedError("You have to implement find_xsduri method.")
 
-    def create_taxonomies(self, root_dir: Path):
-        raise NotImplementedError("You have to implement create_taxonomies method.")
+    # def create_taxonomies(self, root_dir: str) -> dict[str, BaseTaxonomy]:
+    #     raise NotImplementedError("You have to implement create_taxonomies method.")
 
     @property
-    def published_date(self):
+    def published_date(self) -> tuple[datetime, str]:
         raise NotImplementedError("You have to implement published_date.")
     
     @property
-    def company_code(self):
+    def company_code(self) -> str:
         raise NotImplementedError("You have to implement company_code.")
     
     @property
-    def default_linkbase(self):
+    def default_linkbase(self) -> dict[str, str]:
         raise NotImplementedError("You have to implement default_linkbase.")
         
     @property
-    def has_schema(self):
+    def has_schema(self) -> bool:
         return self.find_path("xsd") is not None
 
     @property
-    def xbrl(self):
+    def xbrl(self) -> BeautifulSoup:
         return self.read_file("xbrl")
 
     @property
-    def xsd(self):
+    def xsd(self) -> BeautifulSoup:
         return self.read_file("xsd")
 
     @property
-    def cal(self):
+    def cal(self) -> BeautifulSoup:
         return self.read_file("cal")
 
     @property
-    def def_(self):
+    def def_(self) -> BeautifulSoup:
         return self.read_file("def")
 
     @property
-    def lab(self):
+    def lab(self) -> BeautifulSoup:
         return self.read_file("lab")
 
     @property
-    def lab_en(self):
+    def lab_en(self) -> BeautifulSoup:
         return self.read_file("lab-en")
 
     @property
-    def pre(self):
+    def pre(self) -> BeautifulSoup:
         return self.read_file("pre")
 
     @property
-    def man(self):
+    def man(self) -> BeautifulSoup:
         return self.read_file("man")

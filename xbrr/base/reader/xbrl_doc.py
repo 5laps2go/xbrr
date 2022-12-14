@@ -12,9 +12,10 @@ class XbrlDoc(BaseDoc):
         def read_schemaRefs(xsd_xml):
             dict = {}
             schema = xsd_xml.find('schema')
-            dict[schema['targetNamespace']] = os.path.basename(self.find_path('xsd'))
-            for ref in xsd_xml.find_all('import'):
-                dict[ref['namespace']] = ref['schemaLocation']
+            if schema is not None:
+                dict[schema['targetNamespace']] = os.path.basename(self.find_path('xsd'))
+                for ref in xsd_xml.find_all('import'):
+                    dict[ref['namespace']] = ref['schemaLocation']
             return dict
         def read_linkbaseRefs(xsd_xml):
             href_list = []
@@ -25,19 +26,19 @@ class XbrlDoc(BaseDoc):
                 href_list.append((ref['xlink:href'], linkrole))
             return href_list
         xsd_xml = self.xsd
-        self._schema_dic = read_schemaRefs(xsd_xml) if xsd_xml is not None else None
-        self._linkbase_tuples = read_linkbaseRefs(xsd_xml) if xsd_xml is not None else None
+        self._schema_dic = read_schemaRefs(xsd_xml)
+        self._linkbase_tuples = read_linkbaseRefs(xsd_xml)
 
-    def read_file(self, kind):
+    def read_file(self, kind:str) -> BeautifulSoup:
         path = self.find_path(kind)
         if (not os.path.isfile(path)):
-            return None
+            return BeautifulSoup()  # no content
         if kind not in self._cache:
             with open(path, encoding="utf-8-sig") as f:
                 self._cache[kind] = BeautifulSoup(f, "lxml-xml")
         return self._cache[kind]
     
-    def find_laburi(self, xsduri, kind) -> str:
+    def find_laburi(self, xsduri:str, kind:str) -> str:
         """find label xml uri by schema uri"""
         namespace = xsduri
         if xsduri.startswith('http'):
@@ -49,7 +50,7 @@ class XbrlDoc(BaseDoc):
             href = os.path.basename(path)
         return href
     
-    def find_xsduri(self, namespace) -> str:
+    def find_xsduri(self, namespace:str) -> str:
         """find xsd uri by namespace """
         if namespace not in self._schema_dic:
             if namespace.startswith('http'):
@@ -59,7 +60,7 @@ class XbrlDoc(BaseDoc):
             return xsdloc
         return self._schema_dic[namespace]
 
-    def _find_linkbaseRef(self, kind, namespace) -> str:
+    def _find_linkbaseRef(self, kind:str, namespace:str) -> str:
         if namespace.startswith('http'):
         # if namespace!="local":
             ns_base = "/".join(namespace.split('/')[0:-1])

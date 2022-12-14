@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from zipfile import ZipFile
 from datetime import datetime
@@ -13,26 +14,34 @@ class Taxonomy(BaseTaxonomy):
     def __init__(self, taxonomy_root):
         super().__init__(
             root = taxonomy_root,
+            family = 'tdnet',
             prefix = "http://www.xbrl.tdnet.info/taxonomy/")
 
     def __reduce_ex__(self, proto):
         return type(self), (self.root,)
 
     def download(self, published_date:datetime, kind:str):
-        year = str(self.taxonomy_year(published_date, kind))
-        expand_dir = self.root.joinpath("taxonomy").joinpath("tdnet")
-        marker_dir = self.root.joinpath("taxonomy").joinpath(year)
+        year = str(self.taxonomy_year(published_date))
+        self._download(year)
+    
+    def provision(self, family_version:str):
+        year = family_version.split(':')[1]
+        self._download(year)
+
+    def _download(self, year:str):
+        expand_dir = os.path.join(os.path.join(self.root, "taxonomy"), "tdnet")
+        marker_dir = os.path.join(os.path.join(self.root, "taxonomy"), year)
         self.path = expand_dir
-        taxonomy_file = self.root.joinpath(f"{year}_taxonomy.zip")
+        taxonomy_file = os.path.join(self.root, f"{year}_taxonomy.zip")
 
         download = False
 
-        if not self.root.exists():
-            self.root.mkdir(parents=True, exist_ok=True)
+        if not os.path.isdir(self.root):
+            os.makedirs(self.root, exist_ok=True)
             download = True
 
-        if not marker_dir.exists():
-            marker_dir.mkdir(parents=True, exist_ok=True)
+        if not os.path.isdir(marker_dir):
+            os.makedirs(marker_dir, exist_ok=True)
             download = True
 
         if download:
@@ -43,13 +52,13 @@ class Taxonomy(BaseTaxonomy):
                         taxonomy_at = dirs.index("taxonomy") if "taxonomy" in dirs else -1
                         if taxonomy_at > 0 and len(dirs) > (taxonomy_at + 1):
                             dirs = dirs[(dirs.index("taxonomy") + 1):]
-                            _to = expand_dir.joinpath("/".join(dirs))
+                            _to = Path(expand_dir).joinpath("/".join(dirs))
                             _to.parent.mkdir(parents=True, exist_ok=True)
                             with _to.open("wb") as _to_f:
                                 _to_f.write(zip.read(f))
 
             r = requests.get(self.TAXONOMIES[year], stream=True)
-            with taxonomy_file.open(mode="wb") as f:
+            with open(taxonomy_file, mode="wb") as f:
                 for chunk in r.iter_content(1024):
                     f.write(chunk)
 
@@ -65,15 +74,15 @@ class Taxonomy(BaseTaxonomy):
                                 extract_taxonomy(f, zip2)
                     else:
                         extract_taxonomy(name, zip)
-            taxonomy_file.unlink()
+            os.remove(taxonomy_file) # .unlink()
 
         return expand_dir
 
-    def taxonomy_year(self, published_date:datetime, kind:str) -> str:
+    def taxonomy_year(self, report_date:datetime) -> str:
         taxonomy_year = ""
         for y in sorted(list(self.TAXONOMIES.keys()), reverse=True):
             boarder_date = datetime(int(y[:4]), 3, 31)
-            if published_date > boarder_date:
+            if report_date > boarder_date:
                 taxonomy_year = y
                 break
         return taxonomy_year

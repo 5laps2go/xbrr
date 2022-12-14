@@ -104,16 +104,6 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
-    def create_taxonomies(self, root_dir) -> dict[str, BaseTaxonomy]:
-        if 'Attachment' in self.file_spec:
-            etxnmy = EdinetTaxonomy(root_dir)
-            ttxnmy = TdnetTaxonomy(root_dir)
-            return {etxnmy.prefix: etxnmy, ttxnmy.prefix: ttxnmy}
-
-        assert 'Summary' in self.file_spec or '/./'  in self.file_spec
-        ttxnmy = TdnetTaxonomy(root_dir)
-        return {ttxnmy.prefix: ttxnmy}
-
     def _prepare_xbrl(self, xsd_file: str) -> str:
         """process ixbrl to xbrl
         """
@@ -133,7 +123,8 @@ class Doc(XbrlDoc):
             infile = self.file_spec+"-ixbrl.htm"
             xbrl_file = self.file_spec + ".xbrl"
 
-        command = "xsltproc -o %s %s %s" % (xbrl_file, xsl_file, infile)
+        if os.path.isfile(xbrl_file): return xbrl_file
+        command = "xalan -q -out %s -xsl %s -in %s" % (xbrl_file, xsl_file, infile)
         proc = subprocess.run(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
 
         if not os.path.isfile(xbrl_file):

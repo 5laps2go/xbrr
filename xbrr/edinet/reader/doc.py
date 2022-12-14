@@ -41,7 +41,7 @@ class Doc(XbrlDoc):
         return path
 
     @property
-    def default_linkbase(self) -> dict[str, str]:
+    def default_linkbase(self) -> dict:
         return {
             'doc': self.pre,
             'link_node': 'link:presentationLink',
@@ -82,7 +82,3 @@ class Doc(XbrlDoc):
             return v1[1][0:6]
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
-
-    def create_taxonomies(self, root_dir) -> dict[str, BaseTaxonomy]:
-        etxnmy = EdinetTaxonomy(root_dir)
-        return {etxnmy.prefix: etxnmy}

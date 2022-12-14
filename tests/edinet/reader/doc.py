@@ -2,6 +2,7 @@ import os
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 from bs4 import BeautifulSoup
 import re
+from datetime import datetime
 
 class Doc(XbrlDoc):
     """
@@ -23,7 +24,7 @@ class Doc(XbrlDoc):
     
     def read_file(self, kind):
         if kind != "xbrl":
-            return None
+            return BeautifulSoup()
         with open(self.xbrl_file, encoding="utf-8-sig") as f:
             xml = BeautifulSoup(f, "lxml-xml")
         return xml
@@ -32,5 +33,10 @@ class Doc(XbrlDoc):
         return "unknown.xsd"
 
     def create_taxonomies(self, root_dir):
-        return None
+        from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
+        etxnmy = EdinetTaxonomy(root_dir)
+        return {etxnmy.prefix: etxnmy}
 
+    @property
+    def published_date(self) -> tuple[datetime, str]:
+        return (datetime(2018,3,1), 'a')

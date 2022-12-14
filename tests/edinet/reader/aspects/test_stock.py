@@ -21,8 +21,8 @@ class TestStock(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(os.path.join(cls.reader.save_dir, "S100G70J"))
-        if os.path.exists(cls.reader.taxonomies_root):
-            shutil.rmtree(cls.reader.taxonomies_root)
+        if os.path.exists(cls.reader.taxonomy_repo.taxonomies_root):
+            shutil.rmtree(cls.reader.taxonomy_repo.taxonomies_root)
 
     def test_dividend_paid(self):
         feature = self.reader.extract(Stock).dividend_paid
