@@ -1,7 +1,6 @@
 from xbrr.edinet.client.document_list_client import MetaDataClient
 from xbrr.edinet.client.document_list_client import DocumentListClient
 from xbrr.edinet.client.document_client import DocumentClient
-from xbrr.xbrl.reader.reader import Reader
 from xbrr.edinet.reader.aspects.business import Business
 from xbrr.edinet.reader.aspects.company import Company
 from xbrr.edinet.reader.aspects.finance import Finance
@@ -25,12 +24,6 @@ class APIFacade():
     def document(self):
         client = DocumentClient()
         return client
-
-
-class ReaderFacade():
-
-    def read(self, xbrl_doc):
-        return Reader(xbrl_doc)
 
 
 class AspectFacade():

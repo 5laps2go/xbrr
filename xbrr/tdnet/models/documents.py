@@ -1,5 +1,5 @@
 from xbrr.xbrl.models.metadata import MetaData
-from xbrr.edinet.models.document import Document
+from xbrr.tdnet.models.document import Document
 
 
 class Documents():

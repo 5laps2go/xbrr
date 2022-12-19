@@ -40,7 +40,7 @@ Download the documents from [EDINET](http://disclosure.edinet-fsa.go.jp/).
 import xbrr
 
 
-documents = xbrr.edinet.api.documents.get("2019-01-31")
+documents = xbrr.xxx.api.documents.get("2019-01-31")     # xxx: edinet or tdnet
 print(f"Number of documents is {len(documents.list)}")
 print(f"Title of first document is {documents.list[0].title}")
 ```
@@ -52,14 +52,14 @@ from pathlib import Path
 import xbrr
 
 
-xbrl_path = xbrr.edinet.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd())
-pdf_path = xbrr.edinet.api.document.get_pdf("S100FGR9", save_dir=Path.cwd())
+xbrl_path = xbrr.xxx.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd())  # xxx: edinet or tdnet
+pdf_path = xbrr.xxx.api.document.get_pdf("S100FGR9", save_dir=Path.cwd())    # xxx: edinet or tdnet
 ```
 
 Each XBRL includes taxonomy information. If you want to deal with these files, execute the following.
 
 ```py
-xbrl_dir = xbrr.edinet.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd(), expand_level="dir")
+xbrl_dir = xbrr.xxx.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd(), expand_level="dir")
 ```
 
 
@@ -68,15 +68,15 @@ xbrl_dir = xbrr.edinet.api.document.get_xbrl("S100FGR9", save_dir=Path.cwd(), ex
 Extract contents from XBRL.
 
 ```py
-xbrl = xbrr.xbrl.reader.read("path/to/xbrl/file")
-content = xbrl.extract(xbrr.edinet.aspects.Business).policy_environment_issue_etc.value
+xbrl = xbrr.reader.read("path/to/xbrl/file")
+content = xbrl.extract(xbrr.xxx.aspects.Business).policy_environment_issue_etc.value # xxx: edinet or tdnet
 ```
 
 Extract financial statements.
 
 ```py
-xbrl_dir = xbrr.xbrl.reader.read("path/to/xbrl/dir")
-xbrl_dir.extract(xbrr.edinet.aspects.Finance).bs.to_csv("bs.csv", index=False)
+xbrl_dir = xbrr.reader.read("path/to/xbrl/dir")
+xbrl_dir.extract(xbrr.xxx.aspects.Finance).bs.to_csv("bs.csv", index=False) # xxx: edinet or tdnet
 ```
 
 ![bs.png](./docs/images/bs.png)

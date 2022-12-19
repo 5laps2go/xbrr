@@ -1,7 +1,6 @@
 
-from xbrr.edinet.facade import APIFacade, ReaderFacade, AspectFacade
+from xbrr.edinet.facade import APIFacade, AspectFacade
 
 
 api = APIFacade()
-reader = ReaderFacade()
 aspects = AspectFacade()
