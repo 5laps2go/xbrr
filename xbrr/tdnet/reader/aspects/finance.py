@@ -1,8 +1,10 @@
-import re
 import collections
 import importlib
+import re
+
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
+
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.xbrl.reader.element_value import ElementValue
 

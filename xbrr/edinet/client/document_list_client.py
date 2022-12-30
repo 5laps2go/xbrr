@@ -1,9 +1,10 @@
-from typing import Union
 from datetime import datetime
+from typing import Dict, Union
+
 import requests
+
 from xbrr.edinet.client.base_client import BaseClient
-from xbrr.edinet.models import MetaData, Documents
-from typing import Dict
+from xbrr.edinet.models import Documents, MetaData
 
 
 class BaseDocumentListClient(BaseClient):

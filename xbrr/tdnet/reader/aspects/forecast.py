@@ -1,6 +1,7 @@
 import re
 import warnings
 from datetime import datetime
+
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.xbrl.reader.element_value import ElementValue
 

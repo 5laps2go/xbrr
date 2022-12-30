@@ -1,11 +1,12 @@
-from typing import Union
-from datetime import datetime
 import re
+from datetime import datetime
+from typing import Dict, Union
+
 import requests
 import urllib3
 from bs4 import BeautifulSoup
+
 from xbrr.tdnet.models import Documents
-from typing import Dict
 
 
 class BaseDocumentListClient():

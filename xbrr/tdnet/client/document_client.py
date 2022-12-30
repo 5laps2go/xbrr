@@ -1,8 +1,10 @@
 import re
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from zipfile import ZipFile
+
 import requests
+
 from xbrr.xbrl.models.error_response import ErrorResponse
 
 

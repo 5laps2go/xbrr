@@ -1,14 +1,17 @@
-import os
 import errno
 import glob
+import os
+import subprocess
 from datetime import datetime
+from subprocess import PIPE
+
+from bs4 import BeautifulSoup
+
+from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
 from xbrr.tdnet.reader.taxonomy import Taxonomy as TdnetTaxonomy
-import subprocess
-from subprocess import PIPE
-from bs4 import BeautifulSoup
-from xbrr.base.reader.base_taxonomy import BaseTaxonomy
+
 
 class Doc(XbrlDoc):
 

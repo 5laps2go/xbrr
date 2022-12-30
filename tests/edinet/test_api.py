@@ -41,7 +41,7 @@ class TestAPI(unittest.TestCase):
         path = os.path.join(os.path.dirname(__file__),
                             "./data/xbrl2019.xbrl")
 
-        result = xbrr.edinet.reader.read(testdoc.Doc(path)).extract(
+        result = xbrr.reader.read(testdoc.Doc(path)).extract(
                     xbrr.edinet.aspects.Business).policy_environment_issue_etc
         self.assertTrue(result.value)
 
@@ -49,5 +49,5 @@ class TestAPI(unittest.TestCase):
         path = os.path.join(os.path.dirname(__file__),
                             "./data/xbrl2019.xbrl")
 
-        result = xbrr.edinet.reader.read(testdoc.Doc(path)).extract("information", "number_of_directors")
+        result = xbrr.reader.read(testdoc.Doc(path)).extract("information", "number_of_directors")
         self.assertEqual(result.value, 14)

@@ -1,8 +1,8 @@
-from xbrr.tdnet.client.document_list_client import DocumentListClient
+from xbrr.edinet.reader.aspects.metadata import Metadata
 from xbrr.tdnet.client.document_client import DocumentClient
+from xbrr.tdnet.client.document_list_client import DocumentListClient
 from xbrr.tdnet.reader.aspects.finance import Finance
 from xbrr.tdnet.reader.aspects.forecast import Forecast
-from xbrr.edinet.reader.aspects.metadata import Metadata
 
 
 class APIFacade():

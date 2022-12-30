@@ -1,6 +1,9 @@
 from datetime import datetime
-from xbrr.base.reader.base_taxonomy import BaseTaxonomy
+
 from bs4 import BeautifulSoup
+
+from xbrr.base.reader.base_taxonomy import BaseTaxonomy
+
 
 class BaseDoc():
     """

@@ -1,6 +1,6 @@
-from xbrr.edinet.client.document_list_client import MetaDataClient
-from xbrr.edinet.client.document_list_client import DocumentListClient
 from xbrr.edinet.client.document_client import DocumentClient
+from xbrr.edinet.client.document_list_client import (DocumentListClient,
+                                                     MetaDataClient)
 from xbrr.edinet.reader.aspects.business import Business
 from xbrr.edinet.reader.aspects.company import Company
 from xbrr.edinet.reader.aspects.finance import Finance

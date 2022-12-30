@@ -1,7 +1,10 @@
 import os
 from datetime import datetime
-from xbrr.base.reader.base_doc import BaseDoc
+
 from bs4 import BeautifulSoup
+
+from xbrr.base.reader.base_doc import BaseDoc
+
 
 class XbrlDoc(BaseDoc):
 

@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 
+
 class BaseTaxonomy():
     """
     Taxonomy base class

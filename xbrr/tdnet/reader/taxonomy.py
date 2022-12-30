@@ -1,10 +1,13 @@
 import os
-from pathlib import Path
-from zipfile import ZipFile
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
+from zipfile import ZipFile
+
 import requests
+
 from xbrr.base.reader.base_taxonomy import BaseTaxonomy
+
 
 class Taxonomy(BaseTaxonomy):
     TAXONOMIES = {
