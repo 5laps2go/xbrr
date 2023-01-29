@@ -37,9 +37,10 @@ class Doc(XbrlDoc):
 
     def find_path(self, kind) -> str:
         # TDNET report file name spec. is like EDINET
+        # around 2014, -calculation.xml,-presentation.xml after 2020 -cal.xml,-pre.xml
         suffix = {
-            "xbrl": ".xbrl", "xsd": ".xsd", "cal": "-cal.xml", "def": "-def.xml",
-            "lab": "-lab.xml", "lab-en": "-lab-en.xml", "pre": "-pre.xml",
+            "xbrl": ".xbrl", "xsd": ".xsd", "cal": "-cal*.xml", "def": "-def.xml",
+            "lab": "-lab.xml", "lab-en": "-lab-en.xml", "pre": "-pre*.xml",
             }
 
         if kind == "man":
@@ -48,6 +49,8 @@ class Doc(XbrlDoc):
                 raise Exception(f"manifest file does not exist.")
         elif kind in suffix:
             path = self.file_spec + suffix[kind]
+            files = glob.glob(path)
+            if len(files)>0: return files[0]
         else: # kind=file name case
             path = os.path.join(os.path.dirname(self.file_spec), kind)
 
@@ -57,7 +60,7 @@ class Doc(XbrlDoc):
     def default_linkbase(self) -> dict:
         if 'Attachment' in self.file_spec:
             return {
-                'doc': self.pre,
+                'doc': 'pre', # document kind for the order of financial statements
                 'link_node': 'link:presentationLink',
                 'arc_node': 'link:presentationArc',
                 'roleRef': 'link:roleRef',
@@ -66,7 +69,7 @@ class Doc(XbrlDoc):
 
         assert 'Summary' in self.file_spec or '/./'  in self.file_spec
         return {
-            'doc': self.def_,
+            'doc': 'def', # document kind for the order of financial statements
             'link_node': 'definitionLink',
             'arc_node': 'definitionArc',
             'roleRef': 'roleRef',

@@ -18,6 +18,7 @@ class Finance(BaseParser):
             "segment_information": "jpcrp_cor:NotesSegmentInformationEtcConsolidatedFinancialStatementsTextBlock",
             "real_estate_for_lease": "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock",
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
+            "fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
         }
 
         super().__init__(reader, ElementValue, tags)
@@ -28,21 +29,24 @@ class Finance(BaseParser):
 
     def bs(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('bs')
-        role_uri = self.reader.get_role(role[0]).uri
-        # role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_BalanceSheet"
-        # if ifrs and self.use_IFRS:
-        #     role_uri = "http://disclosure.edinet-fsa.go.jp/role/jpigp/rol_ConsolidatedStatementOfFinancialPositionIFRS"
+        if len(role) == 0:
+            textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
+            return self.__read_finance_statement(textblock.html) if textblock is not None\
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
+        role = role[0]
+        role_uri = self.reader.get_role(role).uri
 
         bs = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(bs)
 
     def pl(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('pl')
-        role_uri = self.reader.get_role(role[0]).uri
-        # role_uri = "http://disclosure.edinet-fsa.go.jp/role/jppfs/rol_StatementOfIncome"
-        # if ifrs and self.use_IFRS:
-        #     role_base = "http://disclosure.edinet-fsa.go.jp/role/jpigp/"
-        #     role_uri = f"{role_base}rol_ConsolidatedStatementOfComprehensiveIncomeIFRS"
+        if len(role) == 0:
+            textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
+            return self.__read_finance_statement(textblock.html) if textblock is not None\
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
+        role = role[0]
+        role_uri = self.reader.get_role(role).uri
 
         pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(pl)
@@ -51,7 +55,8 @@ class Finance(BaseParser):
         role = self.__find_role_name('cf')
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
-            return self.__read_finance_statement(textblock.html) if textblock is not None else None
+            return self.__read_finance_statement(textblock.html) if textblock is not None\
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
@@ -67,9 +72,9 @@ class Finance(BaseParser):
 
     def __find_role_name(self, finance_statement):
         role_candiates = {
-            'bs': ["StatementOfFinancialPositionIFRS", "ConsolidatedBalanceSheet", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLossIFRS", "StatementOfIncome", "StatementOfComprehensiveIncomeSingleStatementIFRS"],
-            'cf': ["StatementOfCashFlowsIFRS", "StatementOfCashFlows"],
+            'bs': ["StatementOfFinancialPosition", "ConsolidatedBalanceSheet", "BalanceSheet"],
+            'pl': ["StatementOfProfitOrLoss", "StatementOfIncome", "ComprehensiveIncomeSingleStatement", "StatementsOfIncome"],
+            'cf': ["StatementOfCashFlows"],
         }
         roles = []
         for name in role_candiates[finance_statement]:
@@ -85,10 +90,10 @@ class Finance(BaseParser):
         return element_value
 
     def __read_finance_statement(self, statement_xml):
-        def myen(value):
-            if value=='－':
-                return '000'
-            myen = value.replace(',','').replace('△', '-')
+        def myen(value, unit):
+            if value in ['－', '-', '―']:
+                return ''
+            myen = value.replace(',','').replace('△', '-') + unit if len(value)>0 else ''
             return myen
         def isnum(myen):
             try:
@@ -106,32 +111,57 @@ class Finance(BaseParser):
             ks = sorted(c.keys(), key=int)
             return "-".join([str(c[x]) for x in ks])
 
-        unit = ''
+        precol = -2
+        unit = '000000'
         values = []
         for table in statement_xml.select('table'):
             for record in table.select('tr'):
                 columns = list(record.select('td'))
                 label = ''.join([x.text.strip() for x in columns[0].select('p')])
-                value = myen(columns[-1].text.strip())
-                style_str = columns[0].find('p')['style'] if label != "" else ""
-                m = re.match(r'.*margin-left: *([0-9]*).?[0-9]*px.*', style_str)
+                if label=='' and len(columns)>3:
+                    label = ''.join([x.text.strip() for x in columns[1].select('p')])
+                value = myen(columns[-1].text.strip(), unit)
+                style_str = columns[0].find('p').get('style',"") if label != "" else ""
+                m = re.match(r'.*-left: *([0-9]*).?[0-9]*p[tx].*', style_str)
                 margin = m.groups()[0] if m is not None else "0"
 
-                if isnum(value):
+                if label != "" and value == "": # skip headding part
+                    # label+"合計"でここから始まるブロックが終わるという規約であれば、depthに依存関係を入れられる
+                    pass
+                elif isnum(value):
+                    if '.' in value: continue   # skip float value １株当たり四半期利益
+                    prev_value = myen(columns[precol].text.strip(), unit)
                     values.append({
                         'label': label,
-                        'value': value + unit,
-                        'indent': indent_label(margin)
+                        'value': prev_value,
+                        'unit': 'JPY',
+                        'indent': indent_label(margin),
+                        'context': 'Prior1YTDDuration',
+                        'data_type': 'monetary',
+                        'name': "dummy",
+                        'depth': 1
                     })
-                elif label != "" and value == "":
                     values.append({
                         'label': label,
-                        'indent': indent_label(margin)
+                        'value': value,
+                        'unit': 'JPY',
+                        'indent': indent_label(margin),
+                        'context': 'CurrentYTDDuration',
+                        'data_type': 'monetary',
+                        'name': "dummy",
+                        'depth': 1
                     })
                 else:
-                    assert value=='' or '単位：' in value or '百万円' in value or '当連結会計年度' in value
+                    assert value=='' or  '円' in value or value.startswith('当') #'当連結会計年度' in value
                     if '百万円' in value: # 単位：百万円 金額（百万円）
                         unit = '000000'
-                    elif '単位：円' in value:
+                    elif '千円' in value:
+                        unit = '000'
+                    elif '単位：円' in value or '円' in value:
                         unit = ''
+                    if value.startswith('当'): #'当連結会計年度' in value
+                        if columns[-2].text.strip().startswith('前'):
+                            precol = -2
+                        if columns[-3].text.strip().startswith('前'):
+                            precol = -3
         return pd.DataFrame(values)

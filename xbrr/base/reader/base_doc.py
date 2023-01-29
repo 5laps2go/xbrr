@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from bs4 import BeautifulSoup
@@ -38,6 +39,10 @@ class BaseDoc():
     @property
     def default_linkbase(self) -> dict[str, str]:
         raise NotImplementedError("You have to implement default_linkbase.")
+    
+    @property
+    def dirname(self) -> str:
+        return os.path.dirname(self.xbrl_file)
         
     @property
     def has_schema(self) -> bool:
@@ -51,26 +56,26 @@ class BaseDoc():
     def xsd(self) -> BeautifulSoup:
         return self.read_file("xsd")
 
-    @property
-    def cal(self) -> BeautifulSoup:
-        return self.read_file("cal")
+    # @property
+    # def cal(self) -> BeautifulSoup:
+    #     return self.read_file("cal")
 
-    @property
-    def def_(self) -> BeautifulSoup:
-        return self.read_file("def")
+    # @property
+    # def def_(self) -> BeautifulSoup:
+    #     return self.read_file("def")
 
-    @property
-    def lab(self) -> BeautifulSoup:
-        return self.read_file("lab")
+    # @property
+    # def lab(self) -> BeautifulSoup:
+    #     return self.read_file("lab")
 
-    @property
-    def lab_en(self) -> BeautifulSoup:
-        return self.read_file("lab-en")
+    # @property
+    # def lab_en(self) -> BeautifulSoup:
+    #     return self.read_file("lab-en")
 
-    @property
-    def pre(self) -> BeautifulSoup:
-        return self.read_file("pre")
+    # @property
+    # def pre(self) -> BeautifulSoup:
+    #     return self.read_file("pre")
 
-    @property
-    def man(self) -> BeautifulSoup:
-        return self.read_file("man")
+    # @property
+    # def man(self) -> BeautifulSoup:
+    #     return self.read_file("man")

@@ -23,10 +23,9 @@ class Reader(BaseReader):
         self.save_dir = save_dir
         self._role_dic = {}
         self._context_dic, self._value_dic, self._namespace_dic =\
-            ElementValue.read_xbrl_values(self, self.xbrl)
+            ElementValue.read_xbrl_values(self, xbrl_doc.xbrl)
 
-        self.taxonomy_families = self.get_taxonomy_families()
-        self._xsd_dic = self.taxonomy_repo.get_schema_dict(self.taxonomy_families)
+        self.schema_dic = self.taxonomy_repo.get_schema_dicts(self._namespace_dic)
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy_repo, )
@@ -35,27 +34,25 @@ class Reader(BaseReader):
     def custom_roles(self):
         if len(self._role_dic) == 0:
             linkbase = self.xbrl_doc.default_linkbase
-            self._role_dic.update(RoleSchema.read_role_ref(self, linkbase['doc'], linkbase['link_node']))
+            xml = self.read_uri(self.xbrl_doc.find_kind_uri(linkbase['doc']))
+            self._role_dic.update(RoleSchema.read_role_ref(self, xml, linkbase['link_node']))
         return self._role_dic
 
     @property
     def namespaces(self):
         return self._namespace_dic
 
-    @property
-    def xbrl(self):
-        return self.xbrl_doc.xbrl
-
     def get_schema_by_link(self, link:str) -> ElementSchema:
-        assert "#" in link
-        xsduri = link.split("#")[0]
-        element = link.split("#")[-1]
-        if element not in self._xsd_dic:
-            self._xsd_dic.update(ElementSchema.read_schema(self, xsduri))
-            # prepare label xml href dict from local xsd
-            ElementSchema.read_label_taxonomy(self, xsduri, self._xsd_dic)
-        return self._xsd_dic[element] if element in self._xsd_dic\
-             else ElementSchema(name=element, reference=link) # avoid reference error
+        assert "#" in link                  # http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2020-11-01/jppfs_rt_2020-11-01.xsd#rol_ConsolidatedLabel
+        xsduri = link.split("#")[0]         # http://...(edinet|tdnet).../...
+        element = link.split("#")[-1]       # tse-acedjpfr-36450_PromotionReturnIncomeNOI
+        xsd_dic = self.schema_dic.get_dict(xsduri, element)
+
+        elemschema = xsd_dic.get(element, None)
+        if elemschema is None:
+            xsd_dic.update(ElementSchema.read_schema(self, xsduri))
+            elemschema = xsd_dic.get(element, ElementSchema(name=element, reference=link)) # avoid reference error
+        return elemschema
 
     def get_role(self, role_name) -> RoleSchema:
         if '/' in role_name:
@@ -64,36 +61,34 @@ class Reader(BaseReader):
 
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
-        self.taxonomy_repo.provision(uri, self.taxonomy_families)
+        if not uri.startswith('http'):
+            path = os.path.join(self.xbrl_doc.dirname, uri)
+            return self.read_file(path)
 
-        path = self._uri_to_path(uri)
+        path = self.uri_to_path(uri)
+        return self.read_file(path)
+    
+    def read_file(self, path:str) -> BeautifulSoup:
+        if (not os.path.isfile(path)):
+            return BeautifulSoup()  # no content
         with open(path, encoding="utf-8-sig") as f:
             xml = BeautifulSoup(f, "lxml-xml")
         return xml
     
-    def get_taxonomy_families(self) -> list[str]:
-        def fullyear_report_date(published_date:datetime, kind:str):
-            if kind != 'a':
-                duration = self.findv('jpdei_cor_TypeOfCurrentPeriodDEI')
-                if duration is not None:
-                    q = int(duration.value[1]) if duration.value[1].isdigit() else 2 # second quater
-                    return published_date - timedelta(days=q*90)
-            return published_date
+    def get_label_uri(self, xsduri:str) -> str:
+        "get the uri of the label for the xsd uri"
+        laburi = self.xbrl_doc.find_kind_uri('lab', xsduri)
+        return laburi
 
-        report_date = fullyear_report_date(*self.xbrl_doc.published_date)
-        return self.taxonomy_repo.get_family_versions(report_date)
-
-    def read_label_of_xsd(self, xsduri:str) -> BeautifulSoup:
-        "read label linkbase content specified by xsd uri"
-        laburi = self.xbrl_doc.find_laburi(xsduri, 'lab')
-        return self.read_uri(laburi)
-
-    def _uri_to_path(self, uri:str) -> str:
+    def uri_to_path(self, uri:str) -> str:
         paths = self.taxonomy_repo.uri_to_path(uri)
         if len(paths) > 0:
             path = paths[0]
         else: # for local uri
-            path = self.xbrl_doc.find_path(uri)
+            raise Exception("_uri_to_path", uri)
+            print('_uri_to_path', uri)
+            path = os.path.join(self.xbrl_doc.dirname, uri)
+            # path = self.xbrl_doc.find_path(uri)
         return path
 
     def read_schema_by_role(self, role_name, use_cal_link=False):
@@ -102,9 +97,12 @@ class Reader(BaseReader):
 
         nodes = {}
         linkbase = self.xbrl_doc.default_linkbase
-        self.make_node_tree(nodes, role_name, linkbase['doc'], linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
+        xml = self.read_uri(self.xbrl_doc.find_kind_uri(linkbase['doc']))
+        self.make_node_tree(nodes, role_name, xml, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
         if use_cal_link:
-            self.make_node_tree(nodes, role_name, self.xbrl_doc.cal, "link:calculationLink", "link:calculationArc", "summation-item")
+            # TODO: use every cal docs defined in XBRL._linkbaseRef
+            calxml = self.read_uri(self.xbrl_doc.find_kind_uri('cal'))
+            self.make_node_tree(nodes, role_name, calxml, "link:calculationLink", "link:calculationArc", "summation-item")
         return self.flatten_to_schemas(nodes)
 
     def make_node_tree(self, nodes, role_name, doc, link_node, arc_node, arc_role):
@@ -185,7 +183,7 @@ class Reader(BaseReader):
         Returns:
             xbrl_data -- Saved XbRL values.
         """
-        schemas = self.read_schema_by_role(role_link)
+        schemas = self.read_schema_by_role(role_link, use_cal_link)
         if len(schemas) == 0:
             return None
 

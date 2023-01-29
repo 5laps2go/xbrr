@@ -28,12 +28,6 @@ class TestDoc(unittest.TestCase):
         self.assertEqual(doc.company_code, 'E01726')
 
         self.assertGreater(len(doc.xsd.find_all("element")), 0)
-        self.assertGreater(len(doc.cal.find_all("calculationLink")), 0)
-        self.assertGreater(len(doc.def_.find_all("definitionArc")), 0)
-        self.assertGreater(len(doc.lab.find_all("labelLink")), 0)
-        self.assertGreater(len(doc.lab_en.find_all("labelLink")), 0)
-        self.assertGreater(len(doc.pre.find_all("presentationLink")), 0)
-        self.assertTrue(doc.man.find("manifest"))
 
     def test_find_xsduri(self):
         doc = self.doc
@@ -47,8 +41,8 @@ class TestDoc(unittest.TestCase):
 
     def test_find_laburi(self):
         doc = self.doc
-        self.assertEqual(doc.find_laburi('local', 'lab'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
-        self.assertEqual(doc.find_laburi('jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd', 'lab'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
+        self.assertEqual(doc.find_kind_uri('lab', ''), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
+        self.assertEqual(doc.find_kind_uri('lab', 'jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
 
-        self.assertEqual(doc.find_laburi(doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor'), 'lab'), 
+        self.assertEqual(doc.find_kind_uri('lab', doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor')), 
                         "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/label/jpcrp_2018-02-28_lab.xml")

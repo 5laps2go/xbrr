@@ -6,6 +6,8 @@ from bs4.element import NavigableString, Tag
 
 class ElementValue(BaseElementValue):
 
+    hankaku_dic = str.maketrans('１２３４５６７８９０（）［］','1234567890()[]')
+
     def __init__(self, name="", reference="",
                  value="", unit="", decimals="",
                  context_ref={},
@@ -50,7 +52,7 @@ class ElementValue(BaseElementValue):
     @classmethod
     def create_element_value(cls, reader, xml_el, context_dic):
         name = xml_el.name
-        value = xml_el.text
+        value = xml_el.text.strip().translate(cls.hankaku_dic)
         unit = ""
         if "unitRef" in xml_el.attrs:
             unit = xml_el["unitRef"]

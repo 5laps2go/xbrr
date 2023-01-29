@@ -23,9 +23,3 @@ class TestDoc(unittest.TestCase):
         self.assertEqual(doc.company_code, '36450')
 
         self.assertGreater(len(doc.xsd.find_all("element")), 0)
-        self.assertGreater(len(doc.cal.find_all("calculationLink")), 0)
-        self.assertGreater(len(doc.def_.find_all("definitionArc")), 0)
-        self.assertGreater(len(doc.lab.find_all("labelLink")), 0)
-        self.assertGreater(len(doc.lab_en.find_all("labelLink")), 0)
-        self.assertGreater(len(doc.pre.find_all("presentationLink")), 0)
-        self.assertTrue(doc.man.find("manifest"))

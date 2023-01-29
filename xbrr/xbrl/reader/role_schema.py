@@ -22,7 +22,8 @@ class RoleSchema(BaseElementSchema):
         link_node_roles = [x["xlink:role"].rsplit("/")[-1] for x in xml.find_all(link_node)]
         role_dic = {}
         for element in xml.find_all('roleRef'):
-            role_name = element["xlink:href"].split("#")[-1]
+            role_ref = element["xlink:href"].split("#")[-1]
+            role_name = element["roleURI"].rsplit("/")[-1]
 
             link = element["xlink:href"]
             if not link.startswith('http') and base_xsduri != None:

@@ -8,9 +8,10 @@ import tests.edinet.reader.doc as testdoc
 class TestInformation(unittest.TestCase):
 
     def get_xbrl(self):
+        _dir = os.path.join(os.path.dirname(__file__), "../../data")
         path = os.path.join(os.path.dirname(__file__),
                             "../../data/xbrl2019.xbrl")
-        xbrl = Reader(testdoc.Doc(path))
+        xbrl = Reader(testdoc.Doc(path), save_dir=_dir)
         return xbrl
 
     def test_shareholders(self):

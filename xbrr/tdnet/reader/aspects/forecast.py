@@ -28,6 +28,25 @@ class Forecast(BaseParser):
             "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
             "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
+        old_tags = {
+            "document_name": "tse-t-ed:DocumentName",
+            "security_code": "tse-t-ed:SecuritiesCode",
+            "company_name": "tse-t-ed:CompanyName",
+            "company_name_en": "jpdei_cor:FilerNameInEnglishDEI",
+
+            "fiscal_date_end": "tse-t-ed:FiscalYearEnd",
+            "filling_date": "tse-t-ed:FilingDate",
+            "forecast_correction_date": "tse-t-rv:ReportingDateOfFinancialForecastCorrection",
+            "dividend_correction_date": "tse-t-rv:ReportingDateOfDividendForecastCorrection",
+
+            "forecast_correction_flag": "tse-t-ed:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
+            "dividend_correction_flag": "tse-t-ed:CorrectionOfDividendForecastInThisQuarter",
+
+            "sales": "tse-t-ed:Sales",
+            "sales_IFRS": "tse-t-ed:SalesIFRS",
+            "netsales_IFRS": "tse-t-ed:NetSalesIFRS",
+            "profit_IFRS": "tse-t-ed:ProfitIFRS"
+        }
         reit_tags = {
             "document_name": "tse-re-t:DocumentName",
             "security_code": "tse-re-t:SecuritiesCode",
@@ -45,6 +64,8 @@ class Forecast(BaseParser):
             super().__init__(reader, ElementValue, tags)
         elif "tse-re-t"in reader.namespaces:
             super().__init__(reader, ElementValue, reit_tags)
+        elif "tse-t-ed" in reader.namespaces:
+            super().__init__(reader, ElementValue, old_tags)    # for old tdnet
 
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
@@ -65,16 +86,16 @@ class Forecast(BaseParser):
 
     @property
     def use_IFRS(self):
-        return (self.profit_IFRS.value is not None) or (self.netsales_IFRS.value is not None)
+        return (self.profit_IFRS.value is not None) or \
+            (self.netsales_IFRS.value is not None) or (self.sales_IFRS.value is not None)
     
     @property
     def reporting_date(self):
-        wareki = {'令和': 2019}
-        dic = str.maketrans('１２３４５６７８９０（）［］','1234567890()[]')
+        wareki = {'令和': 2019, '平成': 1989, '昭和': 1926}
         def wareki2year(elemvalue):
-            date1 = elemvalue.value.translate(dic).replace(' ','')
+            date1 = elemvalue.value.replace(' ','')
             for waname in wareki.keys():
-                m = re.search(r'{}([0-9]+)年'.format(waname), date1.translate(dic).replace(' ',''))
+                m = re.search(r'{}([0-9]+)年'.format(waname), date1)
                 if m != None:
                     elemvalue.value = date1.replace(
                         waname+m.groups()[0],str(int(m.groups()[0])+wareki[waname]-1))

@@ -31,8 +31,6 @@ class TestReader(unittest.TestCase):
 
         bs = reader.read_schema_by_role("rol_QuarterlyConsolidatedBalanceSheet").reset_index()
         xsd_dic1 = self.taxonomy_repo.taxonomy_repo
-        # print(self.taxonomy_repo.taxonomy_repo['2021']['jppfs_cor_AssetsAbstract'])
-        download_state = self.taxonomy_repo.download_state
 
         root_dir = os.path.join(self._dir, "E24982")
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
@@ -40,7 +38,5 @@ class TestReader(unittest.TestCase):
 
         bs = reader.read_schema_by_role("rol_BalanceSheet").reset_index()
         xsd_dic2 = self.taxonomy_repo.taxonomy_repo
-        # print(self.taxonomy_repo.taxonomy_repo['2021']['jppfs_cor_AssetsAbstract'])
 
-        self.assertDictEqual(download_state, self.taxonomy_repo.download_state)
         self.assertDictEqual(xsd_dic1, xsd_dic2)

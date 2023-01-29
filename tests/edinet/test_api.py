@@ -1,12 +1,20 @@
 import os
+import shutil
 import time
 import unittest
+
+import tests.edinet.reader.doc as testdoc
 import xbrr
 from tests.utils import delay
-import tests.edinet.reader.doc as testdoc
 
 
 class TestAPI(unittest.TestCase):
+
+    @classmethod
+    def tearDownClass(cls):
+        external = "external"
+        if os.path.exists(external):
+            shutil.rmtree(external)
 
     @delay
     def test_api_metadata(self):

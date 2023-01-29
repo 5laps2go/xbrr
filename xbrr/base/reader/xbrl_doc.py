@@ -8,6 +8,13 @@ from xbrr.base.reader.base_doc import BaseDoc
 
 class XbrlDoc(BaseDoc):
 
+    non_explicit_schema_dict = {
+        # TDNET
+        "http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30": "http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30/tse-t-ed-2007-06-30.xsd",
+        # EDINET
+        "http://info.edinet-fsa.go.jp/jp/fr/gaap/t/cte/2013-03-01":"http://info.edinet-fsa.go.jp/jp/fr/gaap/t/cte/2013-03-01/jpfr-t-cte-2013-03-01.xsd",
+    }
+
     def __init__(self, package, root_dir="", xbrl_file=""):
         super().__init__(package, root_dir=root_dir, xbrl_file=xbrl_file)
         self._cache = {}
@@ -29,7 +36,8 @@ class XbrlDoc(BaseDoc):
                 href_list.append((ref['xlink:href'], linkrole))
             return href_list
         xsd_xml = self.xsd
-        self._schema_dic = read_schemaRefs(xsd_xml)
+        self._schema_dic = self.non_explicit_schema_dict
+        self._schema_dic.update(read_schemaRefs(xsd_xml))
         self._linkbase_tuples = read_linkbaseRefs(xsd_xml)
 
     def read_file(self, kind:str) -> BeautifulSoup:
@@ -40,19 +48,17 @@ class XbrlDoc(BaseDoc):
             with open(path, encoding="utf-8-sig") as f:
                 self._cache[kind] = BeautifulSoup(f, "lxml-xml")
         return self._cache[kind]
-    
-    def find_laburi(self, xsduri:str, kind:str) -> str:
-        """find label xml uri by schema uri"""
-        namespace = xsduri
-        if xsduri.startswith('http'):
-            namespace = next(k for k,v in self._schema_dic.items() if v==xsduri)
 
-        href = self._find_linkbaseRef(kind, namespace)
-        if len(href) == 0:
-            path = self.find_path(kind)
-            href = os.path.basename(path)
-        return href
-    
+    def find_kind_uri(self, kind:str, xsduri="") -> str:
+        kind2linkbase = {'lab':'labelLinkbaseRef', 'cal':'calculationLinkbaseRef', 
+                        'pre':'presentationLinkbaseRef', 'def':'definitionLinkbaseRef'}
+        linkbase_type = kind2linkbase[kind]
+        try:
+            if xsduri=="": xsduri = os.path.basename(self.xbrl_file)
+            return self._find_linkbaseRef(linkbase_type, xsduri)
+        except Exception:
+            return ''
+
     def find_xsduri(self, namespace:str) -> str:
         """find xsd uri by namespace """
         if namespace not in self._schema_dic:
@@ -63,15 +69,16 @@ class XbrlDoc(BaseDoc):
             return xsdloc
         return self._schema_dic[namespace]
 
-    def _find_linkbaseRef(self, kind:str, namespace:str) -> str:
-        if namespace.startswith('http'):
-        # if namespace!="local":
-            ns_base = "/".join(namespace.split('/')[0:-1])
-        else:
-            ns_base = os.path.basename(os.path.splitext(self.xbrl_file)[0])
+    def _find_linkbaseRef(self, linkbase_type:str, docuri:str) -> str:
+        if docuri.startswith('http'):
+            doc_base = os.path.dirname(docuri)
+        else: # for local document
+            doc_base = os.path.basename(os.path.splitext(self.xbrl_file)[0])
 
         for pair in self._linkbase_tuples:
-            if pair[0].startswith(ns_base) and pair[0].endswith(kind+".xml"):
+            if pair[0].startswith(doc_base) and pair[1]==linkbase_type:
+                if linkbase_type=='labelLinkbaseRef' and pair[0].endswith('-en.xml'):
+                    continue
                 return pair[0]
 
         raise Exception(f"linkbase ref does not exist.")

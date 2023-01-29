@@ -8,9 +8,10 @@ import tests.edinet.reader.doc as testdoc
 class TestBusiness(unittest.TestCase):
 
     def get_xbrl(self, year=2019):
+        _dir = os.path.join(os.path.dirname(__file__), "../../data")
         path = os.path.join(os.path.dirname(__file__),
                             f"../../data/xbrl{year}.xbrl")
-        xbrl = Reader(testdoc.Doc(path))
+        xbrl = Reader(testdoc.Doc(path), save_dir=_dir)
         return xbrl
 
     def test_policy_environment_issue_etc(self):

@@ -31,14 +31,14 @@ class TestReader(unittest.TestCase):
     def test_findv(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        xbrl = Reader(testdoc.Doc(path))
+        xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
         element_value = xbrl.findv("jpdei_cor:EDINETCodeDEI")
         self.assertEqual(element_value.value, "E05739")
 
     def test_to_html(self):
         path = os.path.join(os.path.dirname(__file__),
                             "../data/xbrl2019.xbrl")
-        xbrl = Reader(testdoc.Doc(path))
+        xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
         tag = "jpcrp_cor:InformationAboutOfficersTextBlock"
         html = xbrl.findv(tag).html
 
