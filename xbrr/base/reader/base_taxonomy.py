@@ -23,5 +23,8 @@ class BaseTaxonomy():
     def is_defined(self, uri:str):
         raise NotImplementedError("You have to implement is_defined method.")
     
+    def implicit_xsd(self, namespace:str) -> str:
+        raise NotImplementedError("You have to implement implicit_xsd method.")
+    
     def uri_to_path(self, uri:str) -> str:
         raise NotImplementedError("You have to implement uri_to_path method.")

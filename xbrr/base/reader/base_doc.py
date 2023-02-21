@@ -22,8 +22,8 @@ class BaseDoc():
     def read_file(self, kind: str) -> BeautifulSoup:
         raise NotImplementedError("You have to implement read_file method.")
 
-    def find_xsduri(self, namespace: str) -> str:
-        raise NotImplementedError("You have to implement find_xsduri method.")
+    # def find_xsduri(self, namespace: str) -> str:
+    #     raise NotImplementedError("You have to implement find_xsduri method.")
 
     # def create_taxonomies(self, root_dir: str) -> dict[str, BaseTaxonomy]:
     #     raise NotImplementedError("You have to implement create_taxonomies method.")
@@ -52,30 +52,6 @@ class BaseDoc():
     def xbrl(self) -> BeautifulSoup:
         return self.read_file("xbrl")
 
-    @property
-    def xsd(self) -> BeautifulSoup:
-        return self.read_file("xsd")
-
     # @property
-    # def cal(self) -> BeautifulSoup:
-    #     return self.read_file("cal")
-
-    # @property
-    # def def_(self) -> BeautifulSoup:
-    #     return self.read_file("def")
-
-    # @property
-    # def lab(self) -> BeautifulSoup:
-    #     return self.read_file("lab")
-
-    # @property
-    # def lab_en(self) -> BeautifulSoup:
-    #     return self.read_file("lab-en")
-
-    # @property
-    # def pre(self) -> BeautifulSoup:
-    #     return self.read_file("pre")
-
-    # @property
-    # def man(self) -> BeautifulSoup:
-    #     return self.read_file("man")
+    # def xsd(self) -> BeautifulSoup:
+    #     return self.read_file("xsd")

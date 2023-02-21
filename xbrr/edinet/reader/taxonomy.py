@@ -11,6 +11,11 @@ from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Taxonomy(BaseTaxonomy):
     TAXONOMIES = {
+        "2008-02-01": "https://www.fsa.go.jp/singi/edinet/20080208/01.zip",
+        "2009-03-09": "https://www.fsa.go.jp/search/20090309/editaxonomy20090309.zip",
+        "2010-03-11": "https://www.fsa.go.jp/search/20100311/editaxonomy20100311.zip",
+        "2011-03-14": "https://www.fsa.go.jp/search/20110314/editaxonomy20110314.zip",
+        "2012-01-25": "https://www.fsa.go.jp/search/20120314/editaxonomy20120125.zip",
         "2013-03-01": "https://www.fsa.go.jp/search/20130301/editaxonomy2013.zip",
         # the above has not taxonomy folder and its prefix begins with "http://info.edinet-fsa.go.jp/"
         # the below has taxonomy folder, after 20140401
@@ -52,6 +57,14 @@ class Taxonomy(BaseTaxonomy):
     def is_defined(self, uri:str):
         return uri.startswith(self.prefix)
     
+    def implicit_xsd(self, namespace:str) -> str:
+        # http://info.edinet-fsa.go.jp/jp/fr/gaap/t/cte/2012-01-25 -> ~/jp/fr/gaap/t/cte/2012-01-25/t-cte.xsd
+        oldhttp = 'http://info.edinet-fsa.go.jp/'
+        basename = namespace.replace(oldhttp,'')
+        split = basename.split('/')
+        xsd_file = '-'.join([split[0]+split[1],split[3],split[4],split[5]]) + '.xsd'
+        return namespace + '/' + xsd_file
+
     def uri_to_path(self, uri:str) -> str:
         if isinstance(self.prefix, tuple):
             for pre in self.prefix:
@@ -85,9 +98,14 @@ class Taxonomy(BaseTaxonomy):
                 for f in zip.namelist():
                     if not zip.getinfo(f).is_dir():
                         dirs = Path(f).parts
-                        if key <= '2013':
-                            zip.extractall(self.expand_dir)
-                            break
+                        if key <= '2013-03-01':
+                            jp_at = dirs.index("jp") if "jp" in dirs else -1
+                            if len(dirs) > jp_at:
+                                dirs = dirs[(dirs.index("jp")):]
+                                _to = Path(self.expand_dir).joinpath("/".join(dirs))
+                                _to.parent.mkdir(parents=True, exist_ok=True)
+                                with _to.open("wb") as _to_f:
+                                    _to_f.write(zip.read(f))
                         # Avoid Japanese path
                         taxonomy_at = dirs.index("taxonomy") if "taxonomy" in dirs else -1
                         if taxonomy_at > 0 and len(dirs) > (taxonomy_at + 1):

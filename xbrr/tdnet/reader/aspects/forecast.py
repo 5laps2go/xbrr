@@ -7,6 +7,18 @@ from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class Forecast(BaseParser):
+    tse_ed_t_role_candiates = {
+        'fc': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual"], #有価証券報告書,決算短信,業績予想の修正
+        'fc_dividends': ["RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],   #有価証券報告書,決算短信,配当予想の修正
+        'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
+        'fc_q2ytd': ["InformationQ2YTD"],
+    }
+    tse_t_ed_role_candiates = {
+        'fc': ["Consolidated"], #有価証券報告書,決算短信,業績予想の修正
+        'fc_dividends': [],   #有価証券報告書,決算短信,配当予想の修正
+        'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
+    }
+
 
     def __init__(self, reader):
         tags = {
@@ -28,7 +40,7 @@ class Forecast(BaseParser):
             "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
             "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
-        old_tags = {
+        tse_t_ed_tags = {
             "document_name": "tse-t-ed:DocumentName",
             "security_code": "tse-t-ed:SecuritiesCode",
             "company_name": "tse-t-ed:CompanyName",
@@ -45,7 +57,11 @@ class Forecast(BaseParser):
             "sales": "tse-t-ed:Sales",
             "sales_IFRS": "tse-t-ed:SalesIFRS",
             "netsales_IFRS": "tse-t-ed:NetSalesIFRS",
-            "profit_IFRS": "tse-t-ed:ProfitIFRS"
+            "profit_IFRS": "tse-t-ed:ProfitIFRS",
+
+            "ForecastDividendPerShare": "tse-t-ed:ForecastDividendPerShareAnnual",
+            "ForecastDividendPerShareUpper":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
+            "ForecastDividendPerShareLower":"tse-t-ed:ForecastLowerDividendPerShareAnnual",
         }
         reit_tags = {
             "document_name": "tse-re-t:DocumentName",
@@ -62,10 +78,16 @@ class Forecast(BaseParser):
         }
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
+            self.namespace_prefix = 'tse-ed-t'
+            self.role_candidates = self.tse_ed_t_role_candiates
         elif "tse-re-t"in reader.namespaces:
             super().__init__(reader, ElementValue, reit_tags)
+            self.namespace_prefix = 'tse-re-t'
+            self.role_candidates = self.tse_ed_t_role_candiates
         elif "tse-t-ed" in reader.namespaces:
-            super().__init__(reader, ElementValue, old_tags)    # for old tdnet
+            super().__init__(reader, ElementValue, tse_t_ed_tags)    # for old tdnet
+            self.namespace_prefix = 'tse-t-ed'
+            self.role_candidates = self.tse_t_ed_role_candiates
 
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
@@ -137,7 +159,14 @@ class Forecast(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        fc = self.reader.read_value_by_role(role_uri, use_cal_link=False)
+        if self.namespace_prefix=='tse-t-ed':
+            pre_ver = self.reader.schema_tree.presentation_version()
+            if pre_ver in ['2012-03-31', '2012-06-30']:
+                fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_0_label': 'label'})
+            else:
+                assert pre_ver in ['2007-06-30', '2010-03-31', '2011-06-30']
+                fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
         return self.__filter_duplicate(fc) if fc is not None else None
 
     def fc_dividends(self, ifrs=False, use_cal_link=True):
@@ -148,6 +177,27 @@ class Forecast(BaseParser):
 
         fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return self.__filter_duplicate(fc) if fc is not None else None
+    
+    def dividend_per_share(self) -> float:
+        import numpy as np
+        if self.namespace_prefix=='tse-t-ed':
+            try:
+                if self.ForecastDividendPerShare.value is not None:
+                    return float(self.ForecastDividendPerShare.value)
+                if self.ForecastUpperDividendPerShare.value is not None:
+                    upper = float(self.ForecastUpperDividendPerShare.value)
+                    lower = float(self.ForecastLowerDividendPerShare.value)
+                    return (upper + lower)/2
+            except ValueError:
+                pass
+            return np.nan
+        fc_df = self.fc_dividends()
+        if fc_df is None:
+            return np.nan
+        query_forecast_figures = 'value!=""&context.str.contains("{}")&not member.str.contains("Previous")&not member.str.startswith("Annual")'.format(self.forecast_year)
+        fc_df = fc_df.query(query_forecast_figures, engine='python')
+        money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
+        return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
 
     def q2ytd(self, ifrs=False, use_cal_link=True):
         role = self.__find_role_name('fc_q2ytd')
@@ -165,14 +215,9 @@ class Forecast(BaseParser):
         return data
 
     def __find_role_name(self, finance_statement):
-        role_candiates = {
-            'fc': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual"], #有価証券報告書,決算短信,業績予想の修正
-            'fc_dividends': ["RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],   #有価証券報告書,決算短信,配当予想の修正
-            'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],
-            'fc_q2ytd': ["InformationQ2YTD"],
-        }
+        custom_roles_dic = self.reader.custom_roles
         roles = []
-        for name in role_candiates[finance_statement]:
-            roles += [x for x in self.reader.custom_roles.keys() if name in x and x not in roles]
+        for name in self.role_candidates[finance_statement]:
+            roles += [x for x in custom_roles_dic.keys() if name in x and x not in roles]
         return roles
     

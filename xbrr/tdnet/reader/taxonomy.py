@@ -12,7 +12,8 @@ from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Taxonomy(BaseTaxonomy):
     TAXONOMIES = {
-        "2011-06-30": "http://www.xbrl.tdnet.info/download/taxonomy/tse-ed-2011-06-30.zip",
+        "2007-06-30": "http://www.xbrl.tdnet.info/download/taxonomy/tse-ed-2011-06-30.zip",
+        "2008-02-01": "http://www.xbrl.tdnet.info/download/taxonomy/tse-o-di-2008-02-01.zip",
         "2014-01-12": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/61_taxonomy.zip",
     }
 
@@ -20,17 +21,18 @@ class Taxonomy(BaseTaxonomy):
         super().__init__(
             root = taxonomy_root,
             family = 'tdnet')
-        self.prefix = "http://www.xbrl.tdnet.info/taxonomy/"
+        self.prefix = "http://www.xbrl.tdnet.info/"
         self.expand_dir = os.path.join(os.path.join(self.root, "taxonomy"), "tdnet")
 
     def __reduce_ex__(self, proto):
         return type(self), (self.root,)
 
     def identify_version(self, namespace:str) -> str:
+        # 2007-06-30:   http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30
         version = ''
-        m = re.match(r'http://.*.tdnet.info/taxonomy/jp/tse/tdnet/[^/]{2}/[^/]/(\d{4}-\d{2}-\d{2})', namespace)
+        m = re.match(r'http://.*.tdnet.info/(taxonomy/jp/tse/tdnet/[^/]{2}/[^/]/(\d{4}-\d{2}-\d{2})|jp/br/tdnet/[^/]/[^/]{2}/(\d{4}-\d{2}-\d{2}))', namespace)
         if m != None:
-            version = m.group(1)
+            version = m.group(2) if m.group(2) else m.group(3)
         return version
 
     def provision(self, version:str):
@@ -38,8 +40,13 @@ class Taxonomy(BaseTaxonomy):
 
     def is_defined(self, uri:str):
         return uri.startswith(self.prefix)
-    
+
+    def implicit_xsd(self, namespace:str) -> str:
+        raise NotImplementedError("You have to implement implicit_xsd method.")
+
     def uri_to_path(self, uri:str) -> str:
+        if uri.startswith(self.prefix+'taxonomy/'):
+            return os.path.join(self.expand_dir, uri.replace(self.prefix+'taxonomy/', ""))
         return os.path.join(self.expand_dir, uri.replace(self.prefix, ""))
 
     def __download(self, key:str, taxonomies:dict[str,str]):
@@ -59,15 +66,15 @@ class Taxonomy(BaseTaxonomy):
         if download:
             # Download
             def extract_taxonomy(f, zip):
-                    if not zip.getinfo(f).is_dir():
-                        dirs = Path(f).parts
-                        taxonomy_at = dirs.index("taxonomy") if "taxonomy" in dirs else -1
-                        if taxonomy_at > 0 and len(dirs) > (taxonomy_at + 1):
-                            dirs = dirs[(dirs.index("taxonomy") + 1):]
-                            _to = Path(self.expand_dir).joinpath("/".join(dirs))
-                            _to.parent.mkdir(parents=True, exist_ok=True)
-                            with _to.open("wb") as _to_f:
-                                _to_f.write(zip.read(f))
+                if not zip.getinfo(f).is_dir():
+                    dirs = Path(f).parts
+                    jp_at = dirs.index("jp") if "jp" in dirs else -1
+                    if jp_at > 0 and len(dirs) > jp_at:
+                        dirs = dirs[(dirs.index("jp")):]
+                        _to = Path(self.expand_dir).joinpath("/".join(dirs))
+                        _to.parent.mkdir(parents=True, exist_ok=True)
+                        with _to.open("wb") as _to_f:
+                            _to_f.write(zip.read(f))
 
             r = requests.get(taxonomies[key], stream=True)
             with open(taxonomy_file, mode="wb") as f:

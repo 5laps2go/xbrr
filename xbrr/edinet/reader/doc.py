@@ -24,8 +24,9 @@ class Doc(XbrlDoc):
     def find_path(self, kind) -> str:
         # EDINET report file name spec.: https://www.fsa.go.jp/search/20170228/2a_1.pdf (4-3)
         suffix = {
-            "xbrl": ".xbrl", "xsd": ".xsd", "cal": "_cal.xml", "def": "_def.xml",
-            "lab": "_lab.xml", "lab-en": "_lab-en.xml", "pre": "_pre.xml",
+            "xbrl": ".xbrl", "xsd": ".xsd",
+            # "cal": "_cal.xml", "def": "_def.xml",
+            # "lab": "_lab.xml", "lab-en": "_lab-en.xml", "pre": "_pre.xml",
             }
 
         if kind == "man":

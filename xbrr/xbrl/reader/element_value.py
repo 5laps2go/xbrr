@@ -61,8 +61,9 @@ class ElementValue(BaseElementValue):
         if "decimals" in xml_el.attrs:
             decimals = xml_el["decimals"]
 
-        xsduri = reader.xbrl_doc.find_xsduri(xml_el.namespace)
-        reference = f"{xsduri}#{xml_el.prefix}_{xml_el.name}"
+        # xsduri = reader.find_xsduri(xml_el.namespace)
+        # reference = f"{xsduri}#{xml_el.prefix}_{xml_el.name}"
+        reference = f"{xml_el.namespace}#{xml_el.prefix}_{xml_el.name}"
 
         context_ref = {}
         if "contextRef" in xml_el.attrs:

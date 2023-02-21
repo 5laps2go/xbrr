@@ -17,17 +17,18 @@ class Doc(XbrlDoc):
 
     def __init__(self, root_dir="", xbrl_kind=""):
 
-        def _glob_list(folders):
-            for folder in folders:
-                xsd_files = glob.glob(os.path.join(root_dir, folder+"/*.xsd"))
+        def _glob_list(patterns):
+            for patn in patterns:
+                xsd_files = glob.glob(os.path.join(root_dir, patn))
                 if xsd_files: return xsd_files
             return []
         def _xbrl_file(root_dir, kind):
-            folder_dict = {'public': ['XBRLData/Attachment'], 'summary': ['XBRLData/Summary','.']}
-            xsd_files = _glob_list(folder_dict[kind])
+            patn_dict = {'public': ['XBRLData/Attachment/tse-??????fr-*.xsd', './tdnet-??????fr-*.xsd'],
+                         'summary': ['XBRLData/Summary/tse-??????sm-*.xsd','./tse-rv??-*.xsd','./tdnet-??????sm-*.xsd']}
+            xsd_files = _glob_list(patn_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
-                    errno.ENOENT, os.strerror(errno.ENOENT), folder_dict[kind])
+                    errno.ENOENT, os.strerror(errno.ENOENT), patn_dict[kind])
             xbrl_file = self._prepare_xbrl(xsd_files[0])
             return xbrl_file
         
@@ -39,8 +40,9 @@ class Doc(XbrlDoc):
         # TDNET report file name spec. is like EDINET
         # around 2014, -calculation.xml,-presentation.xml after 2020 -cal.xml,-pre.xml
         suffix = {
-            "xbrl": ".xbrl", "xsd": ".xsd", "cal": "-cal*.xml", "def": "-def.xml",
-            "lab": "-lab.xml", "lab-en": "-lab-en.xml", "pre": "-pre*.xml",
+            "xbrl": ".xbrl", "xsd": ".xsd",
+            # "cal": "-cal*.xml", "def": "-def.xml",
+            # "lab": "-lab.xml", "lab-en": "-lab-en.xml", "pre": "-pre*.xml",
             }
 
         if kind == "man":
@@ -68,13 +70,22 @@ class Doc(XbrlDoc):
             }
 
         assert 'Summary' in self.file_spec or '/./'  in self.file_spec
-        return {
-            'doc': 'def', # document kind for the order of financial statements
-            'link_node': 'definitionLink',
-            'arc_node': 'definitionArc',
-            'roleRef': 'roleRef',
-            'arc_role': 'domain-member'
-        }
+        if '/tse-' in self.file_spec:
+            return {
+                'doc': 'def', # document kind for the order of financial statements
+                'link_node': 'definitionLink',
+                'arc_node': 'definitionArc',
+                'roleRef': 'roleRef',
+                'arc_role': 'domain-member'
+            }
+        if '/tdnet-' in self.file_spec: # old type of taxonomy before 2014
+            return {
+                'doc': 'pre', # document kind for the order of financial statements
+                'link_node': 'presentationLink',
+                'arc_node': 'presentationArc',
+                'roleRef': 'roleRef',
+                'arc_role': 'parent-child'
+            }
 
     @property
     def published_date(self) -> tuple[datetime, str]:
@@ -129,7 +140,7 @@ class Doc(XbrlDoc):
             infile = self.file_spec+"-ixbrl.htm"
             xbrl_file = self.file_spec + ".xbrl"
 
-        if os.path.isfile(xbrl_file): return xbrl_file
+        if os.path.isfile(xbrl_file) and os.path.getsize(xbrl_file)>0: return xbrl_file
         command = "xalan -q -out %s -xsl %s -in %s" % (xbrl_file, xsl_file, infile)
         proc = subprocess.run(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
 
