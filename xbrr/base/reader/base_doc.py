@@ -52,6 +52,6 @@ class BaseDoc():
     def xbrl(self) -> BeautifulSoup:
         return self.read_file("xbrl")
 
-    # @property
-    # def xsd(self) -> BeautifulSoup:
-    #     return self.read_file("xsd")
+    @property
+    def xsd(self) -> BeautifulSoup:
+        return self.read_file("xsd")

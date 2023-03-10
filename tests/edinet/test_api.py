@@ -30,7 +30,7 @@ class TestAPI(unittest.TestCase):
 
     @delay
     def test_api_documents(self):
-        documents = xbrr.edinet.api.documents.get("2022-02-01")
+        documents = xbrr.edinet.api.documents.get("2023-03-09")
         self.assertEqual(documents.metadata.count, len(documents.list))
 
         _dir = os.path.dirname(__file__)

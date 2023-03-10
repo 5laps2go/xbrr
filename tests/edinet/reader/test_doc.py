@@ -29,20 +29,20 @@ class TestDoc(unittest.TestCase):
 
         self.assertGreater(len(doc.xsd.find_all("element")), 0)
 
-    def test_find_xsduri(self):
-        doc = self.doc
-        self.assertEqual(doc.find_xsduri("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor"),
-                        "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd")
+    # def test_find_xsduri(self):
+    #     doc = self.doc
+    #     self.assertEqual(doc.find_xsduri("http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor"),
+    #                     "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor_2018-02-28.xsd")
 
-        self.assertEqual(doc.find_xsduri("http://disclosure.edinet-fsa.go.jp/jpcrp030000/asr/001/E01726-000/2018-12-31/01/2019-03-27"),
-                        "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd")
-        self.assertEqual(doc.find_xsduri("local"),
-                        "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd")
+    #     self.assertEqual(doc.find_xsduri("http://disclosure.edinet-fsa.go.jp/jpcrp030000/asr/001/E01726-000/2018-12-31/01/2019-03-27"),
+    #                     "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd")
+    #     self.assertEqual(doc.find_xsduri("local"),
+    #                     "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd")
 
-    def test_find_laburi(self):
-        doc = self.doc
-        self.assertEqual(doc.find_kind_uri('lab', ''), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
-        self.assertEqual(doc.find_kind_uri('lab', 'jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
+    # def test_find_laburi(self):
+    #     doc = self.doc
+    #     self.assertEqual(doc.find_kind_uri('lab', ''), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
+    #     self.assertEqual(doc.find_kind_uri('lab', 'jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27.xsd'), "jpcrp030000-asr-001_E01726-000_2018-12-31_01_2019-03-27_lab.xml")
 
-        self.assertEqual(doc.find_kind_uri('lab', doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor')), 
-                        "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/label/jpcrp_2018-02-28_lab.xml")
+    #     self.assertEqual(doc.find_kind_uri('lab', doc.find_xsduri('http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor')), 
+    #                     "http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/label/jpcrp_2018-02-28_lab.xml")

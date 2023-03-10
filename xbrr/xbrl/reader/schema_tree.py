@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 class SchemaTree():
     def __init__(self, reader, base_xsd:str):
         self.reader = reader
+        if base_xsd is None:  # for test_doc.py which has not base xsd
+            return
         self.base_xsduri = os.path.basename(base_xsd)
         base_namespace = self.get_targetNamespace(self.base_xsduri)
         self.namespace_uri = {}

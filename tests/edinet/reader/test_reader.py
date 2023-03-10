@@ -54,7 +54,7 @@ class TestReader(unittest.TestCase):
 
         self.assertDictEqual(element_value.to_dict(), {
             'name': 'NumberOfEmployees', 
-            'reference': 'unknown.xsd#jpcrp_cor_NumberOfEmployees', 
+            'reference': 'http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor#jpcrp_cor_NumberOfEmployees',
             'value': '19081', 'unit': 'pure', 'decimals': '0', 'consolidated': True, 
             'context': 'Prior4YearInstant', 'member': '', 'period': '2014-03-31', 'period_start': None, 'label': ''})
 

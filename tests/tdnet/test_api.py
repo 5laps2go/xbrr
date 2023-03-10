@@ -19,13 +19,13 @@ class TestAPI(unittest.TestCase):
     @delay
     def test_api_document(self):
         _dir = os.path.dirname(__file__)
-        path = xbrr.tdnet.api.document.get_pdf("140120230127595244", save_dir=_dir)
+        path = xbrr.tdnet.api.document.get_pdf("140120230310528211", save_dir=_dir)
         self.assertTrue(os.path.exists(path))
         os.remove(path)
 
     @delay
     def test_api_documents(self):
-        documents = xbrr.tdnet.api.documents.get("2023-01-27")
+        documents = xbrr.tdnet.api.documents.get("2023-03-10")
         self.assertEqual(documents.metadata.count, len(documents.list))
 
         _dir = os.path.dirname(__file__)
