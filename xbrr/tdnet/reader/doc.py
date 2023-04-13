@@ -1,16 +1,13 @@
 import errno
 import glob
 import os
-import subprocess
+import re
 from datetime import datetime
-from subprocess import PIPE
 
 from bs4 import BeautifulSoup
+from bs4.element import NavigableString, Tag
 
-from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 from xbrr.base.reader.xbrl_doc import XbrlDoc
-from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
-from xbrr.tdnet.reader.taxonomy import Taxonomy as TdnetTaxonomy
 
 
 class Doc(XbrlDoc):
@@ -121,12 +118,18 @@ class Doc(XbrlDoc):
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
+    @property
+    def xbrl(self) -> BeautifulSoup:
+        if os.path.isfile(self.xbrl_file) and os.path.getsize(self.xbrl_file)>0:
+            return super().read_file('xbrl')
+        return self.read_ixbrl_as_xbrl()
+
     def _prepare_xbrl(self, xsd_file: str) -> str:
         """process ixbrl to xbrl
         """
         if not os.path.isfile(xsd_file):
             raise Exception(f"XSD file does not exist.")
-        xsl_file = "/usr/local/share/inlinexbrl/processor/Main_exslt.xsl"
+        # xsl_file = "/usr/local/share/inlinexbrl/processor/Main_exslt.xsl"
 
         self.file_spec = os.path.splitext(xsd_file)[0]
         manifest_file = self.find_path('man')
@@ -134,16 +137,105 @@ class Doc(XbrlDoc):
             infile = manifest_file
             with open(manifest_file, encoding="utf-8-sig") as f:
                 manifest_xml = BeautifulSoup(f, "lxml-xml")
-            xbrl_file = os.path.join(os.path.dirname(self.file_spec),  # type: ignore
-                                    manifest_xml.find('instance')['preferredFilename'])  # type: ignore
+            xbrl_file = os.path.join(os.path.dirname(self.file_spec),
+                                    manifest_xml.find('instance')['preferredFilename'])
         else:
             infile = self.file_spec+"-ixbrl.htm"
             xbrl_file = self.file_spec + ".xbrl"
-
-        if os.path.isfile(xbrl_file) and os.path.getsize(xbrl_file)>0: return xbrl_file
-        command = "xalan -q -out %s -xsl %s -in %s" % (xbrl_file, xsl_file, infile)
-        proc = subprocess.run(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
-
-        if not os.path.isfile(xbrl_file):
-            raise Exception(f"XBRL file is not generated.")
         return xbrl_file
+
+    def read_ixbrl_as_xbrl(self) -> BeautifulSoup:
+        def clone(el):
+            if isinstance(el, NavigableString):
+                return type(el)(el)
+            copy = Tag(None, el.builder, el.name, el.namespace, el.prefix)
+            # work around bug where there is no builder set
+            # https://bugs.launchpad.net/beautifulsoup/+bug/1307471
+            copy.attrs = dict(el.attrs)
+            for attr in ('can_be_empty_element', 'hidden'):
+                setattr(copy, attr, getattr(el, attr))
+            for child in el.contents:
+                copy.append(clone(child))
+            return copy        
+        def xlate_to_xbrl(element, xbrl_xml, separator, outbs):
+            def __new_ixvalue(name, prefix, attrs, value):
+                xbrli = outbs.new_tag(name, namespace=nsdecls['xmlns:'+prefix], nsprefix=prefix, **attrs)
+                if 'xsi:nil' not in attrs:
+                    xbrli.string = value
+                    xbrl_xml.append(xbrli)
+            def __replace_nonXXX_on_src(element):
+                # replace ix:nonXXX to its string on ixbrl tree
+                if not element.contents:
+                    element.extract()
+                else:
+                    element.replace_with(element.contents[0].extract())
+            def __xlate_to_xbrl(element):
+                if isinstance(element, NavigableString): return
+                for elem in list(element.contents):  # list not to skip by elem.extract()
+                    if not isinstance(elem, Tag): continue
+                    if elem.prefix == 'ix':
+                        if elem.name in ['nonNumeric']:
+                            prefix,name = tuple(elem["name"].split(':'))
+                            attrs = {k:v for k,v in elem.attrs.items() 
+                                    if k in ['contextRef','decimals','unitRef','xsi:nil']}
+                            __xlate_to_xbrl(elem)
+                            value = str(elem) if elem.attrs.get("escape", "false")=="true" else elem.text
+                            __new_ixvalue(name, prefix, attrs, value)
+                            __replace_nonXXX_on_src(elem)
+                            continue
+                        elif elem.name in ['nonFraction']:
+                            prefix,name = tuple(elem["name"].split(':'))
+                            value = elem.text
+                            attrs = {k:v for k,v in elem.attrs.items() 
+                                    if k in ['contextRef','decimals','unitRef','xsi:nil']}
+                            if "scale" in elem.attrs and elem.attrs.get("format",'')=='ixt:numdotdecimal':
+                                scale = int(elem.attrs["scale"])
+                                decimals = int(elem.attrs["decimals"])
+                                try:
+                                    fval = float(value.replace(',','')) * 10**scale
+                                except ValueError:  # case '0.0<br/>'
+                                    value = re.sub("<.*>", "", value)
+                                    fval = float(value.replace(',','')) * 10**scale
+                                if "sign" in elem.attrs:
+                                    fval = -fval
+                                value = '{0:.{1}f}'.format(fval, decimals if decimals>0 else 0)
+                            __new_ixvalue(name, prefix, attrs, value)
+                            __replace_nonXXX_on_src(elem)
+                            continue
+                        elif elem.name in ['references', 'resources']:
+                            for xbrli in elem.children:
+                                separator.insert_before(clone(xbrli))
+                            continue
+                        # elem.name in ['header', 'hidden']:
+                    # not ix prefix
+                    __xlate_to_xbrl(elem)
+            nsdecls = xbrl_xml.attrs
+            __xlate_to_xbrl(element)
+        def translate_ixbrl(infile, outbs):
+            with open(infile, encoding="utf-8-sig") as f:
+                ixbrl = BeautifulSoup(f, "lxml-xml")
+
+            ixbrl_html = ixbrl.find("html")
+            xbrl_xml = outbs.find('xbrli:xbrl')
+            if not xbrl_xml:
+                nsdecls = {k:v for k,v in ixbrl_html.attrs.items() if ':' in k and k!='xmlns:ix'}
+                xbrl_xml = outbs.new_tag('xbrli:xbrl', **nsdecls)
+                outbs.append(xbrl_xml)
+                xbrl_xml.append(outbs.new_tag('separator'))
+            separator = xbrl_xml.find('separator')
+            xlate_to_xbrl(ixbrl_html, xbrl_xml, separator, outbs)
+                    
+        xbrlbs = BeautifulSoup("", "lxml-xml")
+        manifest_file = self.find_path('man')
+        if os.path.isfile(manifest_file):
+            infile = manifest_file
+            with open(manifest_file, encoding="utf-8-sig") as f:
+                manifest_xml = BeautifulSoup(f, "lxml-xml")
+            for ixbrl in manifest_xml.find('instance').children:
+                if ixbrl.name=="ixbrl":
+                    infile = os.path.join(os.path.dirname(self.file_spec), ixbrl.string)
+                    translate_ixbrl(infile, xbrlbs)
+        else:
+            infile = self.file_spec+"-ixbrl.htm"
+            translate_ixbrl(infile, xbrlbs)
+        return xbrlbs
