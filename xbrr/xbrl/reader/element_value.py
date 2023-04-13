@@ -99,7 +99,7 @@ class ElementValue(BaseElementValue):
                     context_dic[context_id] = context_val
             elif elem.prefix == 'xbrldi':
                 pass
-            else:
+            elif len(context_dic) > 0:
                 instance = cls.create_element_value(reader, elem, context_dic)
                 name = f"{elem.prefix}_{elem.name}"
                 if name not in value_dic:

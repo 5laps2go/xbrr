@@ -107,10 +107,10 @@ class Finance(BaseParser):
         return element_value
 
     def __read_finance_statement(self, statement_xml):
-        def myen(value, unit):
-            if value in ['－', '-', '―']:
+        def myen(vtext, unit):
+            if vtext in ['－', '-', '―'] or len(vtext)==0:
                 return ''
-            myen = value.replace(',','').replace('△', '-') + unit if len(value)>0 else ''
+            myen = vtext.replace(',','').replace('△', '-') + unit
             return myen
         def isnum(myen):
             try:
@@ -119,6 +119,23 @@ class Finance(BaseParser):
                 return False
             else:
                 return True
+        def label_margin(columns):
+            label = ''.join([x.text.strip() for x in columns[0].select('p')])
+            if label != '' and columns[0].get('colspan',"") == '': # column0 has label
+                style_str = columns[0].find('p').get('style',"") if label != "" else ""
+                m = re.match(r'.*-left: *([0-9]*).?[0-9]*p[tx].*', style_str)
+                margin = m.groups()[0] if m is not None else "0"
+            else: # columns construct the label structure
+                margin = 0
+                for margin in range(0,len(columns)+prevcol):
+                    label = ''.join([x.text.strip() for x in columns[margin].select('p')])
+                    if label!='': break
+            return (label, margin)
+        def get_value(column):
+            text = column.text.strip()
+            tokens = re.split('[ \xa0\n]', text)
+            value = myen(tokens[-1], unit)
+            return value if isnum(value) or value=='' else text
         indent_state = []
         def indent_label(margin_left):
             delidx = [i for i,x in enumerate(indent_state) if int(x) > int(margin_left)]
@@ -128,57 +145,60 @@ class Finance(BaseParser):
             ks = sorted(c.keys(), key=int)
             return "-".join([str(c[x]) for x in ks])
 
-        precol = -2
+        thiscol, prevcol = -1, -2
         unit = '000000'
         values = []
         for table in statement_xml.select('table'):
             for record in table.select('tr'):
                 columns = list(record.select('td'))
-                label = ''.join([x.text.strip() for x in columns[0].select('p')])
-                if label=='' and len(columns)>3:
-                    label = ''.join([x.text.strip() for x in columns[1].select('p')])
-                value = myen(columns[-1].text.strip(), unit)
-                style_str = columns[0].find('p').get('style',"") if label != "" else ""
-                m = re.match(r'.*-left: *([0-9]*).?[0-9]*p[tx].*', style_str)
-                margin = m.groups()[0] if m is not None else "0"
+                label, margin = label_margin(columns)
+                value = get_value(columns[thiscol])
 
                 if label != "" and value == "": # skip headding part
                     # label+"合計"でここから始まるブロックが終わるという規約であれば、depthに依存関係を入れられる
-                    pass
+                    indent = indent_label(margin)
                 elif isnum(value):
-                    if '.' in value: continue   # skip float value １株当たり四半期利益
-                    prev_value = myen(columns[precol].text.strip(), unit)
-                    values.append({
-                        'label': label,
-                        'value': prev_value,
-                        'unit': 'JPY',
-                        'indent': indent_label(margin),
-                        'context': 'Prior1YTDDuration',
-                        'data_type': 'monetary',
-                        'name': "dummy",
-                        'depth': 1
-                    })
+                    if '.' in value or label == '': continue   # skip float value １株当たり四半期利益
+                    prev_value = get_value(columns[prevcol])
+                    indent = indent_label(margin)
+                    depth = len(indent.split('-'))
+                    if isnum(prev_value):
+                        values.append({
+                            'label': label,
+                            'value': prev_value,
+                            'unit': 'JPY',
+                            'indent': indent,
+                            'context': 'Prior1YTDDuration',
+                            'data_type': 'monetary',
+                            'name': "dummy",
+                            'depth': depth
+                        })
                     values.append({
                         'label': label,
                         'value': value,
                         'unit': 'JPY',
-                        'indent': indent_label(margin),
+                        'indent': indent,
                         'context': 'CurrentYTDDuration',
                         'data_type': 'monetary',
                         'name': "dummy",
-                        'depth': 1
+                        'depth': depth
                     })
                 else:
-                    assert value=='' or  '円' in value or value.startswith('当') #'当連結会計年度' in value
+                    assert label=='' or value=='' or  '円' in value or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
                     if '百万円' in value: # 単位：百万円 金額（百万円）
                         unit = '000000'
                     elif '千円' in value:
                         unit = '000'
                     elif '単位：円' in value or '円' in value:
                         unit = ''
-                    if value.startswith('当'): #'当連結会計年度' in value
-                        if columns[-2].text.strip().startswith('前'):
-                            precol = -2
-                        if columns[-3].text.strip().startswith('前'):
-                            precol = -3
+                    # if value.startswith('当'): #'当連結会計年度' in value
+                    if any([x.text.strip().startswith('当') for x in columns]): #'当連結会計年度' in value
+                        collen = sum([int(c.get('colspan','1')) for c in columns])
+                        idx = 0
+                        for c in columns:
+                            if c.text.strip().startswith('前'):
+                                prevcol = idx - collen
+                            elif c.text.strip().startswith('当'):
+                                thiscol = idx - collen
+                            idx = idx + int(c.get('colspan','1'))
         return pd.DataFrame(values)

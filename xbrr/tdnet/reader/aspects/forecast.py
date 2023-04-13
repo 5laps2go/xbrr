@@ -1,6 +1,6 @@
 import re
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.xbrl.reader.element_value import ElementValue
@@ -60,8 +60,8 @@ class Forecast(BaseParser):
             "profit_IFRS": "tse-t-ed:ProfitIFRS",
 
             "ForecastDividendPerShare": "tse-t-ed:ForecastDividendPerShareAnnual",
-            "ForecastDividendPerShareUpper":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
-            "ForecastDividendPerShareLower":"tse-t-ed:ForecastLowerDividendPerShareAnnual",
+            "ForecastUpperDividendPerShare":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
+            "ForecastLowerDividendPerShare":"tse-t-ed:ForecastLowerDividendPerShareAnnual",
         }
         reit_tags = {
             "document_name": "tse-re-t:DocumentName",
@@ -106,6 +106,14 @@ class Forecast(BaseParser):
         else:
             raise Exception("Unknown titile found!")
 
+    def get_security_code(self):
+        value = self.get_value("security_code")
+        return value.value if value.value and len(value.value)>=4 else self.reader.xbrl_doc.company_code
+
+    def get_company_name(self):
+        value = self.get_value("company_name")
+        return value.value if value.value else 'not found'
+
     @property
     def use_IFRS(self):
         return (self.profit_IFRS.value is not None) or \
@@ -130,6 +138,15 @@ class Forecast(BaseParser):
         if self.dividend_correction_date.value is not None:
             return wareki2year(self.dividend_correction_date)
         raise NameError('Reporting date not found')
+
+    @property
+    def reporting_iso_date(self):
+        try:
+            report_date = self.reporting_date.value
+            m = re.search(r'([0-9]+)年([0-9]+)月([0-9]+)日', report_date)
+            return date(*(int(x) for x in m.groups())).isoformat()
+        except NameError:
+            return self.reader.xbrl_doc.published_date[0].date().isoformat()
     
     @property
     def reporting_period(self):
@@ -165,7 +182,7 @@ class Forecast(BaseParser):
             if pre_ver in ['2012-03-31', '2012-06-30']:
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_0_label': 'label'})
             else:
-                assert pre_ver in ['2007-06-30', '2010-03-31', '2011-06-30']
+                assert pre_ver in ['2007-06-30', '2010-03-31', '2011-03-31', '2011-06-30']
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
         return self.__filter_duplicate(fc) if fc is not None else None
 
@@ -192,7 +209,7 @@ class Forecast(BaseParser):
                 pass
             return np.nan
         fc_df = self.fc_dividends()
-        if fc_df is None:
+        if fc_df is None or fc_df.empty:
             return np.nan
         query_forecast_figures = 'value!=""&context.str.contains("{}")&not member.str.contains("Previous")&not member.str.startswith("Annual")'.format(self.forecast_year)
         fc_df = fc_df.query(query_forecast_figures, engine='python')
