@@ -24,6 +24,11 @@ class Finance(BaseParser):
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
             "report_Q2": "tse-o-di:TypeOfReports-SecondQuarter",
             "report_Q3": "tse-o-di:TypeOfReports-ThirdQuarter",
+
+            # old style xbrl
+            # "consolidated_flag": "jpfr-di:ConsolidatedBSConsolidatedFinancialStatements",
+            # new style xbrl
+            "whether_consolidated": "jpdei_cor:WhetherConsolidatedFinancialStatementsArePreparedDEI",
         }
 
         super().__init__(reader, ElementValue, tags)
@@ -44,58 +49,103 @@ class Finance(BaseParser):
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q3")
         return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="FY")
 
-    def bs(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('bs')
+    @property
+    def consolidated(self):
+        # old style of xbrl
+        def count(flag):
+            fscount = 0
+            for fstype in ['BS', 'PL', 'CF', 'PLYTD']:
+                for term in ['', 'Quarterly', 'Interim']:
+                    v = self.reader.findv(flag.format(term, fstype)) 
+                    if v and v.value=='true':
+                        fscount = fscount + 1
+            return fscount
+        cons_count = count("jpfr-di:Consolidated{0}{1}Consolidated{0}FinancialStatements")
+        noncons_count = count("jpfr-di:Nonconsolidated{0}{1}Nonconsolidated{0}FinancialStatements")
+        if cons_count == noncons_count and cons_count > 0:
+            return self.reader.xbrl_doc.consolidated
+        
+        if cons_count > noncons_count:
+            return True
+        if noncons_count > cons_count:
+            return False
+        # new style of xbrl
+        if self.whether_consolidated.value=='true':
+            return True
+        return False
+
+    def bs(self, latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('bs', latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1,'consolidated':True}])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
         bs = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
-        return self.__filter_duplicate(bs)
+        return bs if not latest_filter else self.__filter_accounting_items(bs)
 
-    def pl(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('pl')
+    def pl(self, latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('pl', latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1, 'consolidated': True}])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
         pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
-        return self.__filter_duplicate(pl)
+        return pl if not latest_filter else self.__filter_accounting_items(pl)
 
-    def cf(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('cf')
+    def cf(self, latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('cf',latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
+                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1, 'consolidated':True}])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
         cf = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
-        return self.__filter_duplicate(cf)
+        return cf if not latest_filter else self.__filter_accounting_items(cf)
 
-    def __filter_duplicate(self, data):
-        # Exclude dimension member
-        if data is not None:
-            data.drop_duplicates(subset=("name", "period"), keep="first",
-                             inplace=True)
-        return data
+    def __filter_out_str(self):
+        filter_out_str = 'NonConsolidated' if self.consolidated\
+            else '(?<!Non)Consolidated'
+        return filter_out_str
 
-    def __find_role_name(self, finance_statement):
+    def __filter_accounting_items(self, data):
+        if data is None:
+            return data
+        query_str = '~context.str.contains("{0}")&~member.str.contains("{0}")'.format(self.__filter_out_str())
+        consolidated = data.query(query_str, engine='python')
+        # eliminate non related context 'Quarter Duration'
+        query = '~context.str.contains("Quarter")|~context.str.contains("Duration")'
+        filtered = consolidated.query(query, engine='python')
+        if filtered.shape[0] < consolidated.shape[0]/2:
+            filtered = consolidated.query('~({})'.format(query), engine='python')
+        # Exclude dimension member because NetAssets with variety of member attributes
+        filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
+        return filtered
+
+    def __find_role_name(self, finance_statement, latest_filter=False):
+        def consolidate_type_filter(roles):
+            if not latest_filter:
+                return roles
+            filter_out_str = self.__filter_out_str()
+            filtered_roles = [x for x in roles if not re.search(filter_out_str, x)]
+            return sorted(filtered_roles, key=lambda x: 'Consolidated' not in x) if self.consolidated\
+                else filtered_roles
         role_candiates = {
-            'bs': ["StatementOfFinancialPosition", "ConsolidatedBalanceSheet", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLoss", "StatementOfIncome", "ComprehensiveIncomeSingleStatement", "StatementsOfIncome"],
-            'cf': ["StatementOfCashFlows"],
+            'bs': ["StatementOfFinancialPosition", "BalanceSheet"],
+            'pl': ["StatementOfIncome", "StatementsOfIncome", "StatementOfProfitOrLoss", "Income"], # ComprehensiveIncome should be lowest priority
+            'cf': ["StatementOfCashFlows", "CashFlow"],
         }
+        custom_role_keys = consolidate_type_filter(list(self.reader.custom_roles.keys()))
         roles = []
         for name in role_candiates[finance_statement]:
-            roles += [x for x in self.reader.custom_roles.keys() if name in x and 'Notes' not in x and x not in roles]
+            roles += [x for x in custom_role_keys if name in x and 'Notes' not in x and x not in roles]
         return roles
 
     def __read_value_by_textblock(self, candidates):
@@ -171,7 +221,8 @@ class Finance(BaseParser):
                             'context': 'Prior1YTDDuration',
                             'data_type': 'monetary',
                             'name': "dummy",
-                            'depth': depth
+                            'depth': depth,
+                            'consolidated': True
                         })
                     values.append({
                         'label': label,
@@ -181,7 +232,8 @@ class Finance(BaseParser):
                         'context': 'CurrentYTDDuration',
                         'data_type': 'monetary',
                         'name': "dummy",
-                        'depth': depth
+                        'depth': depth,
+                        'consolidated': True
                     })
                 else:
                     assert label=='' or value=='' or  '円' in value or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
@@ -201,4 +253,4 @@ class Finance(BaseParser):
                             elif c.text.strip().startswith('当'):
                                 thiscol = idx - collen
                             idx = idx + int(c.get('colspan','1'))
-        return pd.DataFrame(values)
+        return pd.DataFrame(values).drop_duplicates(subset=['label', 'context'], keep='first')

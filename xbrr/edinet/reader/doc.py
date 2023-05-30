@@ -83,3 +83,7 @@ class Doc(XbrlDoc):
             return v1[1][0:6]
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
+
+    @property
+    def consolidated(self) -> bool:
+        raise FileNotFoundError("Not implemented because of no information for consolidated identification")

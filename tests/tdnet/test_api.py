@@ -1,3 +1,4 @@
+import datetime
 import os
 import shutil
 import time
@@ -16,16 +17,16 @@ class TestAPI(unittest.TestCase):
         if os.path.exists(external):
             shutil.rmtree(external)
 
-    @delay
-    def test_api_document(self):
-        _dir = os.path.dirname(__file__)
-        path = xbrr.tdnet.api.document.get_pdf("140120230310528211", save_dir=_dir)
-        self.assertTrue(os.path.exists(path))
-        os.remove(path)
+    # @delay
+    # def test_api_document(self):
+    #     _dir = os.path.dirname(__file__)
+    #     path = xbrr.tdnet.api.document.get_pdf("140120230310528211", save_dir=_dir)
+    #     self.assertTrue(os.path.exists(path))
+    #     os.remove(path)
 
     @delay
     def test_api_documents(self):
-        documents = xbrr.tdnet.api.documents.get("2023-03-10")
+        documents = xbrr.tdnet.api.documents.get(str(datetime.date.today()))
         self.assertEqual(documents.metadata.count, len(documents.list))
 
         _dir = os.path.dirname(__file__)

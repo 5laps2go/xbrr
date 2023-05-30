@@ -128,10 +128,40 @@ class ElementValue(BaseElementValue):
             "value": self.value,
             "unit": self.unit,
             "decimals": self.decimals,
-            "consolidated": "NonConsolidatedMember" not in context_id,
+            "consolidated": "NonConsolidated" not in context_id,
             "context": id_parts[0],
             "member": id_parts[1] if len(id_parts) > 1 else '',
             "period": self.context_ref['period'],
             "period_start": self.context_ref['period_start'] if 'period_start' in self.context_ref else None,
             "label": self.label,
         }
+        # context string fragment:
+        #   CurrentYear	        当年度
+        #   Interim	            中間期
+        #   Prior1Year	        前年度
+        # 	Prior1Interim	    前中間期
+        # 	Prior2Year	        前々年度
+        #   Prior2Interim	    前々中間期
+        #   Prior{n}Year	    {n}年度前
+        #   Prior{n}Interim	    {n}年度前中間期
+        #   CurrentYTD	        当四半期累計期間
+        # 	CurrentQuarter	    当四半期会計期間
+        # 	Prior{n}YTD	        {n}年度前同四半期累計期間
+        # 	Prior{n}Quarter	    {n}年度前同四半期会計期間
+        #   NextYear            翌年度
+        #   NextAccumulatedQ2   翌第2四半期（累計）
+        # 	FilingDate	        提出日
+        # 	RecordDate	        議決権行使の基準日
+        # 	RecentDate	        最近日
+        # 	FutureDate	        予定日
+        # 	Instant	            時点
+        # 	Duration	        期間
+        # 	Consolidated        連結会計        for old xbrl
+        #   NonConsolidated     非連結会計      for old xbrl
+        # consolidated
+        #   True                連結会計
+        #   False               非連結会計
+        # member examples:
+        #   LegalCapitalSurplusMember CapitalStockMember RetainedEarningsMember CapitalSurplusMember
+        #   PreviousMember_ForecastMember   前回発表予想
+        #   CurrentMember_ForecastMember    今回修正予想

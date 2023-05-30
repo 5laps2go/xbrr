@@ -22,12 +22,6 @@ class BaseDoc():
     def read_file(self, kind: str) -> BeautifulSoup:
         raise NotImplementedError("You have to implement read_file method.")
 
-    # def find_xsduri(self, namespace: str) -> str:
-    #     raise NotImplementedError("You have to implement find_xsduri method.")
-
-    # def create_taxonomies(self, root_dir: str) -> dict[str, BaseTaxonomy]:
-    #     raise NotImplementedError("You have to implement create_taxonomies method.")
-
     @property
     def published_date(self) -> tuple[datetime, str]:
         raise NotImplementedError("You have to implement published_date.")
@@ -35,6 +29,10 @@ class BaseDoc():
     @property
     def company_code(self) -> str:
         raise NotImplementedError("You have to implement company_code.")
+    
+    @property
+    def consolidated(self) -> bool:
+        raise NotImplementedError("You have to implement consolidated.")
     
     @property
     def default_linkbase(self) -> dict[str, str]:

@@ -218,9 +218,7 @@ class Reader(BaseReader):
 
     def findv(self, tag):
         id = tag.replace(':', '_')
-        if id not in self._value_dic:
-            return None
-        return self._value_dic[id][0] # find returns the first element value only.
+        return self._value_dic.get(id, [None])[0] # find returns the first element value only.
 
 
 class Node():

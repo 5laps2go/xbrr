@@ -20,13 +20,13 @@ class Doc(XbrlDoc):
                 if xsd_files: return xsd_files
             return []
         def _xbrl_file(root_dir, kind):
-            patn_dict = {'public': ['XBRLData/Attachment/tse-??????fr-*.xsd', './tdnet-??????fr-*.xsd'],
+            patn_dict = {'public': ['XBRLData/Attachment/tse-??????fr-*.xsd', 'XBRLData/Attachment/tdnet-??????fr-*.xsd', './tdnet-??????fr-*.xsd'],
                          'summary': ['XBRLData/Summary/tse-??????sm-*.xsd','./tse-rv??-*.xsd','./tdnet-??????sm-*.xsd']}
             xsd_files = _glob_list(patn_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
                     errno.ENOENT, os.strerror(errno.ENOENT), patn_dict[kind])
-            xbrl_file = self._prepare_xbrl(xsd_files[0])
+            xbrl_file = self._prepare_xbrl(sorted(xsd_files,reverse=True)[0])
             return xbrl_file
         
         xbrl_file=_xbrl_file(root_dir, xbrl_kind)
@@ -60,9 +60,9 @@ class Doc(XbrlDoc):
         if 'Attachment' in self.file_spec:
             return {
                 'doc': 'pre', # document kind for the order of financial statements
-                'link_node': 'link:presentationLink',
-                'arc_node': 'link:presentationArc',
-                'roleRef': 'link:roleRef',
+                'link_node': 'presentationLink',
+                'arc_node': 'presentationArc',
+                'roleRef': 'roleRef',
                 'arc_role': 'parent-child'
             }
 
@@ -119,6 +119,25 @@ class Doc(XbrlDoc):
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
     @property
+    def consolidated(self) -> bool:
+        def test_consolidated(c) -> bool:
+            return True if c=='c' else False
+        if 'Attachment' in self.file_spec:
+            # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
+            #             0  1          2     3   4  5  6   7   8  9
+            v = os.path.basename(self.file_spec).split('-')
+            return test_consolidated(v[1][1])
+        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
+            # Summary/tse-acedjpsm-36450-20210714336450
+            #          0      1       2         3 
+            v = os.path.basename(self.file_spec).split('-')
+            if 'rvfc' in v[1]:  # ./tse-rvfc-36450-20210714336450 for correction document
+                return True
+            return test_consolidated(v[1][1])
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+
+    @property
     def xbrl(self) -> BeautifulSoup:
         if os.path.isfile(self.xbrl_file) and os.path.getsize(self.xbrl_file)>0:
             return super().read_file('xbrl')
@@ -170,6 +189,12 @@ class Doc(XbrlDoc):
                 else:
                     element.replace_with(element.contents[0].extract())
             def __xlate_to_xbrl(element):
+                def previous_tagstr(elem) -> str:
+                    if bool(re.search('[0-9]',elem.previous_sibling.string or '')):
+                        return elem.previous_sibling.string
+                    for e in elem.previous_siblings:
+                        if isinstance(e, Tag): return e.text
+                    return ''
                 if isinstance(element, NavigableString): return
                 for elem in list(element.contents):  # list not to skip by elem.extract()
                     if not isinstance(elem, Tag): continue
@@ -192,6 +217,12 @@ class Doc(XbrlDoc):
                                 scale = int(elem.attrs["scale"])
                                 decimals = int(elem.attrs["decimals"])
                                 try:
+                                    # temporary fix for bad ix format
+                                    if value=='':
+                                        m = re.search(r'[0-9,.]+', previous_tagstr(elem))
+                                        if not m: continue
+                                        value = m.group()
+                                    
                                     fval = float(value.replace(',','')) * 10**scale
                                 except ValueError:  # case '0.0<br/>'
                                     value = re.sub("<.*>", "", value)

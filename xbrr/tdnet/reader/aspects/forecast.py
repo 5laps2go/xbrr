@@ -143,9 +143,9 @@ class Forecast(BaseParser):
     def reporting_iso_date(self):
         try:
             report_date = self.reporting_date.value
-            m = re.search(r'([0-9]+)年([0-9]+)月([0-9]+)日', report_date)
+            m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
             return date(*(int(x) for x in m.groups())).isoformat()
-        except NameError:
+        except (NameError, AttributeError):
             return self.reader.xbrl_doc.published_date[0].date().isoformat()
     
     @property
@@ -169,9 +169,9 @@ class Forecast(BaseParser):
     @property
     def forecast_year(self):
         return 'NextYear' if self.fiscal_period_kind=='FY' else 'CurrentYear'
-
-    def fc(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('fc')
+    
+    def fc(self,  latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('fc', latest_filter)
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
@@ -181,19 +181,21 @@ class Forecast(BaseParser):
             pre_ver = self.reader.schema_tree.presentation_version()
             if pre_ver in ['2012-03-31', '2012-06-30']:
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_0_label': 'label'})
+            elif pre_ver in ['2011-03-31', '2011-06-30']:
+                fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_3_label': 'label'})
             else:
-                assert pre_ver in ['2007-06-30', '2010-03-31', '2011-03-31', '2011-06-30']
+                assert pre_ver in ['2007-06-30', '2010-03-31']
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
-        return self.__filter_duplicate(fc) if fc is not None else None
+        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
 
-    def fc_dividends(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('fc_dividends')
+    def fc_dividends(self, latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('fc_dividends', latest_filter)
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
         fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
-        return self.__filter_duplicate(fc) if fc is not None else None
+        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
     
     def dividend_per_share(self) -> float:
         import numpy as np
@@ -211,30 +213,44 @@ class Forecast(BaseParser):
         fc_df = self.fc_dividends()
         if fc_df is None or fc_df.empty:
             return np.nan
-        query_forecast_figures = 'value!=""&context.str.contains("{}")&not member.str.contains("Previous")&not member.str.startswith("Annual")'.format(self.forecast_year)
+        query_forecast_figures = 'value!=""&context.str.contains("{}")&not member.str.startswith("Annual")'.format(self.forecast_year)
         fc_df = fc_df.query(query_forecast_figures, engine='python')
         money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
         return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
 
-    def q2ytd(self, ifrs=False, use_cal_link=True):
-        role = self.__find_role_name('fc_q2ytd')
+    def q2ytd(self, latest_filter=False, use_cal_link=True):
+        role = self.__find_role_name('fc_q2ytd', latest_filter)
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
         q2ytd = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
-        return self.__filter_duplicate(q2ytd) if q2ytd is not None else None
+        return q2ytd if q2ytd is None or not latest_filter else self.__filter_accounting_items(q2ytd)
 
-    def __filter_duplicate(self, data):
-        # Exclude dimension member
-        data.drop_duplicates(subset=("name", "member","period"), keep="first",
-                             inplace=True)
-        return data
+    def __filter_out_str(self):
+        filter_out_str = 'NonConsolidated' if self.consolidated\
+            else '(?<!Non)Consolidated'
+        return filter_out_str
 
-    def __find_role_name(self, finance_statement):
-        custom_roles_dic = self.reader.custom_roles
+    def __filter_accounting_items(self, data, consolidate_filter=True):
+        # select consolidated type
+        if consolidate_filter:
+            query_str = '~context.str.contains("{0}")&~member.str.contains("{0}")'.format(self.__filter_out_str())
+            data = data.query(query_str, engine='python')
+        # eliminate PreviousMember
+        query = '~member.str.contains("PreviousMember")'
+        filtered = data.query(query, engine='python')
+        return filtered
+
+    def __find_role_name(self, finance_statement, latest_filter=False):
+        def consolidate_type_filter(roles):
+            if not latest_filter:
+                return roles
+            filter_out_str = self.__filter_out_str()
+            return [x for x in roles if not re.search(filter_out_str, x)]
+        custom_role_keys = consolidate_type_filter(list(self.reader.custom_roles.keys()))
         roles = []
         for name in self.role_candidates[finance_statement]:
-            roles += [x for x in custom_roles_dic.keys() if name in x and x not in roles]
+            roles += [x for x in custom_role_keys if name in x and x not in roles]
         return roles
     
