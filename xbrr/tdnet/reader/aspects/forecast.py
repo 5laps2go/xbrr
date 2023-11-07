@@ -237,6 +237,9 @@ class Forecast(BaseParser):
         return filter_out_str
 
     def __filter_accounting_items(self, data, consolidate_filter=True):
+        if data.size == 0:
+            return None
+        
         # select consolidated type
         if len(data[data['consolidated']]) >= len(data[~data['consolidated']]):
             data = data[data['consolidated']]
