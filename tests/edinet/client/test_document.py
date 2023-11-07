@@ -11,7 +11,7 @@ class TestDocumentClient(unittest.TestCase):
     def test_get(self):
         _dir = os.path.dirname(__file__)
         client = DocumentClient()
-        file_path = client.get("S100FGR9", response_type=1, save_dir=_dir)
+        file_path = client.get("S100PWDV", response_type=1, save_dir=_dir)
         self.assertTrue(os.path.exists(file_path))
         os.remove(file_path)
 
@@ -19,7 +19,7 @@ class TestDocumentClient(unittest.TestCase):
     def test_get_pdf(self):
         _dir = os.path.dirname(__file__)
         client = DocumentClient()
-        file_path = client.get_pdf("S100FGR9", save_dir=_dir)
+        file_path = client.get_pdf("S100PWDV", save_dir=_dir)
         self.assertTrue(os.path.exists(file_path))
         os.remove(file_path)
 
@@ -28,7 +28,7 @@ class TestDocumentClient(unittest.TestCase):
         _dir = os.path.dirname(__file__)
         client = DocumentClient()
         # lang="en" does not exist?
-        file_path = client.get_xbrl("S100FGR9", save_dir=_dir)
+        file_path = client.get_xbrl("S100PWDV", save_dir=_dir)
         self.assertTrue(os.path.exists(file_path))
         os.remove(file_path)
 
@@ -37,7 +37,7 @@ class TestDocumentClient(unittest.TestCase):
         _dir = os.path.dirname(__file__)
         client = DocumentClient()
         # lang="en" does not exist?
-        file_path = client.get_xbrl("S100FGR9", save_dir=_dir,
+        file_path = client.get_xbrl("S100PWDV", save_dir=_dir,
                                     expand_level="dir")
         self.assertTrue(os.path.exists(file_path))
         self.assertTrue(os.path.isdir(file_path))
@@ -57,9 +57,9 @@ class TestDocumentClient(unittest.TestCase):
     @delay
     def test_get_pdf_without_dir(self):
         client = DocumentClient()
-        file_path = client.get_pdf("S100FGR9")
+        file_path = client.get_pdf("S100PWDV")
         self.assertTrue(os.path.exists(file_path))
         name = os.path.basename(file_path)
-        self.assertTrue(str(name).startswith("S100FGR9_2__"))
+        self.assertTrue(str(name).startswith("S100PWDV_2__"))
         self.assertTrue(str(name).endswith(".pdf"))
         os.remove(file_path)

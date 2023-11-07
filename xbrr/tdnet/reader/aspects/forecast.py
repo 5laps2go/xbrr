@@ -91,13 +91,18 @@ class Forecast(BaseParser):
 
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
-        m = re.match(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
+        m = re.search(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
             self.consolidated = '連結' == m.group(6)
-            quoater = '2' if m.group(1)is not None and m.group(2) is None else m.group(2)
-            self.fiscal_period_kind = 'FY' if m.group(1) is None else 'Q' + quoater
+            self.fiscal_period_kind = '0' # don't know which forecast contained
             self.accounting_standards = m.group(4)
         elif ('業績予想' in title or '配当予想' in title):
+            m = re.search(r'(第(.)四半期|中間)', title)
+            if m is not None:   # 9691: 2024年３月期第２四半期連結累計期間業績予想の修正に関するお知らせ
+                self.fiscal_period_kind = 'Q2'
+                self.consolidated = '連結' in title
+                return
+            # 業績予想及び配当予想の修正（特別配当）に関するお知らせ
             self.fiscal_period_kind = '0'
         elif ('剰余金の配当' in title):
             self.fiscal_period_kind = '0'
@@ -150,6 +155,9 @@ class Forecast(BaseParser):
     
     @property
     def reporting_period(self):
+        if self.fiscal_period_kind == 'Q2':
+            return self.fiscal_period_kind
+        
         role = self.__find_role_name('fc_test')
         if len(role) <= 0: return 'Q2'
         return 'FY'
@@ -166,12 +174,8 @@ class Forecast(BaseParser):
         if len(role) <= 0: return ''
         return 'Q2'
 
-    @property
-    def forecast_year(self):
-        return 'NextYear' if self.fiscal_period_kind=='FY' else 'CurrentYear'
-    
     def fc(self,  latest_filter=False, use_cal_link=True):
-        role = self.__find_role_name('fc', latest_filter)
+        role = self.__find_role_name('fc')
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
@@ -186,10 +190,10 @@ class Forecast(BaseParser):
             else:
                 assert pre_ver in ['2007-06-30', '2010-03-31']
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
-        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
+        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=True)
 
     def fc_dividends(self, latest_filter=False, use_cal_link=True):
-        role = self.__find_role_name('fc_dividends', latest_filter)
+        role = self.__find_role_name('fc_dividends')
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
@@ -197,7 +201,7 @@ class Forecast(BaseParser):
         fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
         return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
     
-    def dividend_per_share(self) -> float:
+    def dividend_per_share(self, latest_filter=False) -> float:
         import numpy as np
         if self.namespace_prefix=='tse-t-ed':
             try:
@@ -210,10 +214,10 @@ class Forecast(BaseParser):
             except ValueError:
                 pass
             return np.nan
-        fc_df = self.fc_dividends()
+        fc_df = self.fc_dividends(latest_filter)
         if fc_df is None or fc_df.empty:
             return np.nan
-        query_forecast_figures = 'value!=""&context.str.contains("{}")&not member.str.startswith("Annual")'.format(self.forecast_year)
+        query_forecast_figures = 'value!=""&member.str.contains("ForecastMember")&not member.str.startswith("Annual")'
         fc_df = fc_df.query(query_forecast_figures, engine='python')
         money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
         return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
@@ -234,12 +238,17 @@ class Forecast(BaseParser):
 
     def __filter_accounting_items(self, data, consolidate_filter=True):
         # select consolidated type
-        if consolidate_filter:
-            query_str = '~context.str.contains("{0}")&~member.str.contains("{0}")'.format(self.__filter_out_str())
-            data = data.query(query_str, engine='python')
-        # eliminate PreviousMember
-        query = '~member.str.contains("PreviousMember")'
-        filtered = data.query(query, engine='python')
+        if len(data[data['consolidated']]) >= len(data[~data['consolidated']]):
+            data = data[data['consolidated']]
+        else:
+            data = data[~data['consolidated']]
+
+        # eliminate PreviousMember and filter YearDuration
+        current_year_query = '~member.str.contains("PreviousMember")&context.str.contains("YearDuration")'
+        filtered = data.query(current_year_query, engine='python')
+        # filter forecat members only
+        forecast_query = 'value!=""&(member.str.contains("ForecastMember")|member.str.contains("LowerMember")|member.str.contains("UpperMember"))'
+        filtered = filtered.query(forecast_query, engine='python')
         return filtered
 
     def __find_role_name(self, finance_statement, latest_filter=False):
