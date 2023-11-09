@@ -154,8 +154,13 @@ class Forecast(BaseParser):
             return self.reader.xbrl_doc.published_date[0].date().isoformat()
     
     @property
-    def reporting_period(self):
-        if self.fiscal_period_kind == 'Q2':
+    def forecast_period(self):
+        # 'Role(Quarterly)?Forecasts' for (quarterly)? report which may have 業績予想
+        # 'Role(Quarterly)?Dividends' for (quarterly)? report which may have 配当予想
+        # 'Role(Non)?ConsolidatedInformationAnnual' for '業績予想の修正'
+        # 'RoleRevisedDividendForecast' for '配当予想の修正'
+
+        if self.fiscal_period_kind == 'Q2':   # for bug case
             return self.fiscal_period_kind
         
         role = self.__find_role_name('fc_test')
@@ -175,6 +180,8 @@ class Forecast(BaseParser):
         return 'Q2'
 
     def fc(self,  latest_filter=False, use_cal_link=True):
+        # year forecast:  'ForecastMemger','(Upper|Lower)Member' in member and 'CurrentYearDuration' = context
+        # q2   forecast:  'ForecastMember','(Upper|Lower)Member' in member and 'CurrentAccumulatedQ2Duration' = context
         role = self.__find_role_name('fc')
         if len(role) <= 0: return None
         role = role[0]
