@@ -15,10 +15,12 @@ class SchemaDicts():
             self.schema_dicts[family] = schema_dict
 
     def get_dict(self, xsduri:str, element:str) -> dict[str, ElementSchema]:
+        def isStock5Code(code):             # 銘柄コード for 130A0
+            return code[0:2].isdigit() and len(code)==5
         nsprefix = element.rsplit('_', 1)[0]    # tse-acedjpfr-36450, jpcrp030000-asr_E05739-000
         nsp_suf = nsprefix.split('-')[-1]   # 36450
 
-        if nsp_suf.isdigit():
+        if isStock5Code(nsp_suf):
             return self.custom_dict
         else:
             for family in self.schema_dicts.keys():
