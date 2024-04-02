@@ -21,6 +21,9 @@ class Forecast(BaseParser):
 
 
     def __init__(self, reader):
+        def gen_fiscal_period_kind(m):
+            quoater = '2' if m.group(1)is not None and m.group(2) is None else m.group(2)
+            return 'Q'+quoater if quoater is not None else '0'
         tags = {
             "document_name": "tse-ed-t:DocumentName",
             "security_code": "tse-ed-t:SecuritiesCode",
@@ -94,12 +97,12 @@ class Forecast(BaseParser):
         m = re.search(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
             self.consolidated = '連結' == m.group(6)
-            self.fiscal_period_kind = '0' # don't know which forecast contained
+            self.fiscal_period_kind = gen_fiscal_period_kind(m) # don't know which forecast contained
             self.accounting_standards = m.group(4)
         elif ('業績予想' in title or '配当予想' in title):
             m = re.search(r'(第(.)四半期|中間)', title)
             if m is not None:   # 9691: 2024年３月期第２四半期連結累計期間業績予想の修正に関するお知らせ
-                self.fiscal_period_kind = 'Q2'
+                self.fiscal_period_kind = gen_fiscal_period_kind(m)
                 self.consolidated = '連結' in title
                 return
             # 業績予想及び配当予想の修正（特別配当）に関するお知らせ
@@ -160,9 +163,6 @@ class Forecast(BaseParser):
         # 'Role(Non)?ConsolidatedInformationAnnual' for '業績予想の修正'
         # 'RoleRevisedDividendForecast' for '配当予想の修正'
 
-        if self.fiscal_period_kind == 'Q2':   # for bug case
-            return self.fiscal_period_kind
-        
         role = self.__find_role_name('fc_test')
         if len(role) <= 0: return 'Q2'
         return 'FY'

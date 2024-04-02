@@ -134,18 +134,19 @@ class Finance(BaseParser):
             if not latest_filter:
                 return roles
             filter_out_str = self.__filter_out_str()
-            filtered_roles = [x for x in roles if not re.search(filter_out_str, x)]
-            return sorted(filtered_roles, key=lambda x: 'Consolidated' not in x) if self.consolidated\
-                else filtered_roles
+            filtered_roles = [x for x in roles if not re.search(filter_out_str, x) and 'Notes' not in x]
+            return [x for x in filtered_roles if 'Consolidated' in x],[x for x in filtered_roles if 'Consolidated' not in x]
         role_candiates = {
             'bs': ["StatementOfFinancialPosition", "BalanceSheet"],
             'pl': ["StatementOfIncome", "StatementsOfIncome", "StatementOfProfitOrLoss", "Income"], # ComprehensiveIncome should be lowest priority
             'cf': ["StatementOfCashFlows", "CashFlow"],
         }
-        custom_role_keys = consolidate_type_filter(list(self.reader.custom_roles.keys()))
+        cons_or_noncons_roles, other_roles = consolidate_type_filter(list(self.reader.custom_roles.keys()))
         roles = []
         for name in role_candiates[finance_statement]:
-            roles += [x for x in custom_role_keys if name in x and 'Notes' not in x and x not in roles]
+            roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
+        for name in role_candiates[finance_statement]:
+            roles += [x for x in other_roles if name in x and x not in roles]
         return roles
 
     def __read_value_by_textblock(self, candidates):
