@@ -34,28 +34,27 @@ class DocumentClient():
         """
         url = self.endpoint.format(document_id)
 
-        r = requests.get(url, stream=True)
+        with requests.get(url, stream=True) as r:
+            if not r.ok:
+                r.raise_for_status()
 
-        if not r.ok:
-            r.raise_for_status()
+            _file_name = document_id
+            chunk_size = 1024
+            if save_dir:
+                save_path = Path(save_dir).joinpath(_file_name)
+            else:
+                _file_name = Path(_file_name)
+                tmpf = tempfile.NamedTemporaryFile(
+                        prefix=_file_name.stem + "__",
+                        suffix=_file_name.suffix,
+                        delete=False)
+                save_path = Path(tmpf.name)
 
-        _file_name = document_id
-        chunk_size = 1024
-        if save_dir:
-            save_path = Path(save_dir).joinpath(_file_name)
-        else:
-            _file_name = Path(_file_name)
-            tmpf = tempfile.NamedTemporaryFile(
-                    prefix=_file_name.stem + "__",
-                    suffix=_file_name.suffix,
-                    delete=False)
-            save_path = Path(tmpf.name)
+            with save_path.open(mode="wb") as f:
+                for chunk in r.iter_content(chunk_size):
+                    f.write(chunk)
 
-        with save_path.open(mode="wb") as f:
-            for chunk in r.iter_content(chunk_size):
-                f.write(chunk)
-
-        return save_path
+            return save_path
 
     def get_pdf(self, document_id: str,
                 save_dir: str = "", file_name: str = "") -> Path:
