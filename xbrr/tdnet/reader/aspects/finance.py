@@ -120,6 +120,8 @@ class Finance(BaseParser):
             return data
         query_str = '~context.str.contains("{0}")&~member.str.contains("{0}")'.format(self.__filter_out_str())
         consolidated = data.query(query_str, engine='python')
+        if self.consolidated and consolidated.shape[0]<2:  # non-consolidated bs/pl/cf provided even in the consolidated report
+            consolidated = data
         # eliminate non related context 'Quarter Duration'
         query = '~context.str.contains("Quarter")|~context.str.contains("Duration")'
         filtered = consolidated.query(query, engine='python')
