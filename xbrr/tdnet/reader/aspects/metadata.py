@@ -42,6 +42,8 @@ class Metadata(BaseParser):
             super().__init__(reader, ElementValue, tags)
         elif "tse-o-di"in reader.namespaces:
             super().__init__(reader, ElementValue, tse_o_di_tags)
+        else:   # no metadata found
+            raise NameError("jpdei_cor or tse-o-di")
 
     @property
     def fiscal_year(self):
