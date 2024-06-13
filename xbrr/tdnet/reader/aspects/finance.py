@@ -134,7 +134,7 @@ class Finance(BaseParser):
     def __find_role_name(self, finance_statement, latest_filter=False):
         def consolidate_type_filter(roles):
             if not latest_filter:
-                return roles
+                return roles,[]
             filter_out_str = self.__filter_out_str()
             filtered_roles = [x for x in roles if not re.search(filter_out_str, x) and 'Notes' not in x]
             return [x for x in filtered_roles if 'Consolidated' in x],[x for x in filtered_roles if 'Consolidated' not in x]
@@ -197,13 +197,30 @@ class Finance(BaseParser):
             c = collections.Counter(indent_state)
             ks = sorted(c.keys(), key=int)
             return "-".join([str(c[x]) for x in ks])
+        def analyze_title(columns, thiscol, prevcol):
+            if any([x.text.strip().startswith('当') for x in columns]): #'当連結会計年度' in value
+                collen = sum([int(c.get('colspan','1')) for c in columns])
+                idx = 0
+                for c in columns:
+                    if c.text.strip().startswith('前'):
+                        prevcol = idx - collen
+                    elif c.text.strip().startswith('当'):
+                        thiscol = idx - collen
+                    idx = idx + int(c.get('colspan','1'))
+            return thiscol, prevcol
 
         thiscol, prevcol = -1, -2
         unit = '000000'
         values = []
         for table in statement_xml.select('table'):
-            for record in table.select('tr'):
-                columns = list(record.select('td'))
+            if (thead := table.find('thead', recursive=False)):
+                for record in thead.find_all('tr', recursive=False):
+                    columns = list(record.find_all('td', recursive=False))
+                    thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
+            tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
+            for record in tbody.find_all('tr', recursive=False):
+                columns = list(record.find_all('td', recursive=False))
+                if len(columns) < 3: continue
                 label, margin = label_margin(columns)
                 value = get_value(columns[thiscol])
 
@@ -247,13 +264,5 @@ class Finance(BaseParser):
                     elif '単位：円' in value or '円' in value:
                         unit = ''
                     # if value.startswith('当'): #'当連結会計年度' in value
-                    if any([x.text.strip().startswith('当') for x in columns]): #'当連結会計年度' in value
-                        collen = sum([int(c.get('colspan','1')) for c in columns])
-                        idx = 0
-                        for c in columns:
-                            if c.text.strip().startswith('前'):
-                                prevcol = idx - collen
-                            elif c.text.strip().startswith('当'):
-                                thiscol = idx - collen
-                            idx = idx + int(c.get('colspan','1'))
+                    thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
         return pd.DataFrame(values).drop_duplicates(subset=['label', 'context'], keep='first')

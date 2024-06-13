@@ -132,8 +132,10 @@ class Finance(BaseParser):
         unit = '000000'
         values = []
         for table in statement_xml.select('table'):
-            for record in table.select('tr'):
-                columns = list(record.select('td'))
+            if table.find_parents('table'): continue
+            tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
+            for record in tbody.find_all('tr', recursive=False):
+                columns = list(record.find_all('td', recursive=False))
                 label, margin = label_margin(columns)
                 value = get_value(columns[thiscol])
 

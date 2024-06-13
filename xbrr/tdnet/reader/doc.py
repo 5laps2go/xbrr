@@ -16,12 +16,12 @@ class Doc(XbrlDoc):
 
         def _glob_list(patterns):
             for patn in patterns:
-                xsd_files = glob.glob(os.path.join(root_dir, patn))
+                xsd_files = glob.glob(os.path.join(root_dir, patn), recursive=True)
                 if xsd_files: return xsd_files
             return []
         def _xbrl_file(root_dir, kind):
-            patn_dict = {'public': ['XBRLData/Attachment/tse-??????fr-*.xsd', 'XBRLData/Attachment/tdnet-??????fr-*.xsd', './tdnet-??????fr-*.xsd'],
-                         'summary': ['XBRLData/Summary/tse-??????sm-*.xsd','./tse-rv??-*.xsd','./tdnet-??????sm-*.xsd']}
+            patn_dict = {'public': ['**/tse-??????fr-*.xsd', '**/tdnet-??????fr-*.xsd'],
+                         'summary': ['**/tse-??????sm-*.xsd','**/tse-rv??-*.xsd','**/tdnet-??????sm-*.xsd']}
             xsd_files = _glob_list(patn_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
@@ -30,8 +30,17 @@ class Doc(XbrlDoc):
             return xbrl_file
         
         xbrl_file=_xbrl_file(root_dir, xbrl_kind)
+        self.xbrl_kind = xbrl_kind
         self.file_spec = os.path.splitext(xbrl_file)[0]
         super().__init__("tdnet", root_dir=root_dir, xbrl_file=xbrl_file)
+
+    @staticmethod
+    def find_report(root_dir: str) -> "Doc":
+        try:
+            doc = Doc(root_dir=root_dir, xbrl_kind='summary')
+        except FileNotFoundError as e:
+            doc = Doc(root_dir=root_dir, xbrl_kind='public')
+        return doc
 
     def find_path(self, kind) -> str:
         # TDNET report file name spec. is like EDINET
@@ -57,7 +66,7 @@ class Doc(XbrlDoc):
 
     @property
     def default_linkbase(self) -> dict:
-        if 'Attachment' in self.file_spec:
+        if 'public' == self.xbrl_kind:
             return {
                 'doc': 'pre', # document kind for the order of financial statements
                 'link_node': 'presentationLink',
@@ -66,7 +75,7 @@ class Doc(XbrlDoc):
                 'arc_role': 'parent-child'
             }
 
-        assert 'Summary' in self.file_spec or '/./'  in self.file_spec
+        assert self.xbrl_kind == 'summary'
         if '/tse-' in self.file_spec:
             return {
                 'doc': 'def', # document kind for the order of financial statements
@@ -86,14 +95,14 @@ class Doc(XbrlDoc):
 
     @property
     def published_date(self) -> tuple[datetime, str]:
-        if 'Attachment' in self.file_spec:
+        if 'public' == self.xbrl_kind:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
             #             0  1          2     3   4  5  6   7   8  9
             v = os.path.basename(self.file_spec).split('-')
             date = datetime.strptime("%s-%s-%s" % (v[7], v[8], v[9]), "%Y-%m-%d")
             period = v[1][0]
             return date, period
-        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
+        elif 'summary' == self.xbrl_kind:
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
@@ -105,12 +114,12 @@ class Doc(XbrlDoc):
 
     @property
     def company_code(self) -> str:
-        if 'Attachment' in self.file_spec:
+        if 'public' == self.xbrl_kind:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
             #             0  1          2     3   4  5  6   7   8  9
             v = os.path.basename(self.file_spec).split('-')
             return v[2]
-        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
+        elif 'summary' == self.xbrl_kind:
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
@@ -122,12 +131,12 @@ class Doc(XbrlDoc):
     def consolidated(self) -> bool:
         def test_consolidated(c) -> bool:
             return True if c=='c' else False
-        if 'Attachment' in self.file_spec:
+        if 'public' == self.xbrl_kind:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
             #             0  1          2     3   4  5  6   7   8  9
             v = os.path.basename(self.file_spec).split('-')
             return test_consolidated(v[1][1])
-        elif 'Summary' in self.file_spec or '/./' in self.file_spec:
+        elif 'summary' == self.xbrl_kind:
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
