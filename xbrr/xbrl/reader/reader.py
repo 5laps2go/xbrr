@@ -43,7 +43,8 @@ class Reader(BaseReader):
         if len(self._role_dic) == 0:
             linkbase = self.xbrl_doc.default_linkbase
             xml = self.read_uri(self.schema_tree.find_kind_uri(linkbase['doc']))
-            self._role_dic.update(RoleSchema.read_role_ref(self, xml, linkbase['link_node']))
+            link_node, roleRef = self.get_linkbase_tag(xml, linkbase['link_node'], linkbase['roleRef'])
+            self._role_dic.update(RoleSchema.read_role_ref(self, xml, link_node, roleRef))
         return self._role_dic
 
     @property
@@ -70,6 +71,7 @@ class Reader(BaseReader):
 
     def find_xsduri(self, namespace:str) -> str:
         """find xsd uri by namespace """
+        assert namespace.startswith("http:"), "no namespace found:{}".format(namespace)
         try:
             return self.schema_tree.find_xsduri(namespace)
         except LookupError:
@@ -77,9 +79,16 @@ class Reader(BaseReader):
 
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
+        assert uri.endswith('.xsd') or uri.endswith('.xml') or uri.startswith('http:'), "no xsduri found:{}".format(uri)
         if not uri.startswith('http'):
             uri = os.path.join(self.xbrl_doc.dirname, uri)
         return self.taxonomy_repo.read_uri(uri)
+    
+    def get_linkbase_tag(self, doc:BeautifulSoup, *args):
+        ns_prefixes = {v: k for k,v in doc._namespaces.items()}
+        if (link_prefix:=ns_prefixes.get("http://www.xbrl.org/2003/linkbase")) is not None:
+            return ("{}:{}".format(link_prefix, arg) for arg in args)
+        return args
     
     def get_label_uri(self, xsduri:str) -> str:
         "get the uri of the label for the xsd uri"
@@ -96,7 +105,7 @@ class Reader(BaseReader):
             self.make_node_tree(nodes, role_name, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
         if use_cal_link:
             for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
-                self.make_node_tree(nodes, role_name, docuri, "link:calculationLink", "link:calculationArc", "summation-item")
+                self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item")
         return self.flatten_to_schemas(nodes)
 
     def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role):
@@ -107,6 +116,9 @@ class Reader(BaseReader):
             return urljoin(docuri, xsduri)
 
         doc = self.read_uri(docuri)
+        link_node, arc_node = self.get_linkbase_tag(doc, link_node, arc_node)
+        assert len(doc.contents)==0 or "xlink" in doc._namespaces
+        
         locs = {}
         # for loc in doc.select(f"linkbase > {link_node} > loc"): # "link:loc"
         for loc in doc.find_all("loc"):
@@ -121,11 +133,17 @@ class Reader(BaseReader):
                 parent = locs[arc["xlink:from"]]
                 child = locs[arc["xlink:to"]]
 
+                if arc.get("use", "") == "prohibited":
+                    if arc_node.endswith("calculationArc"):
+                        nodes[get_name(child)].del_derive(nodes[get_name(parent)])
+                    # print("delete {}:{} --> {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child)))
+                    continue
+
                 if get_name(child) not in nodes:
                     xsduri = get_absxsduri(docuri, child["xlink:href"])
                     c = ElementSchema.create_from_reference(self, xsduri)
                     nodes[get_name(child)] = Node(c, arc["order"])
-                else:
+                elif not arc_node.endswith("calculationArc"):
                     nodes[get_name(child)].order = arc["order"]
 
                 if get_name(parent) not in nodes:
@@ -133,7 +151,12 @@ class Reader(BaseReader):
                     p = ElementSchema.create_from_reference(self, xsduri)
                     nodes[get_name(parent)] = Node(p, i)
 
-                nodes[get_name(child)].add_parent(nodes[get_name(parent)])
+                # print("{}:{} --> {}:w{}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0)))
+                if arc_node.endswith("calculationArc"):
+                    if get_name(child) in self._value_dic:
+                        nodes[get_name(child)].add_derive(nodes[get_name(parent)])
+                else:
+                    nodes[get_name(child)].add_parent(nodes[get_name(parent)])
 
     def flatten_to_schemas(self, nodes):
         schemas = []
@@ -159,7 +182,7 @@ class Reader(BaseReader):
                 item[f"parent_{i}_order"] = order
 
             item["order"] = float(n.order)
-            item["depth"] = n.depth
+            item["depth"] = len(n.get_derives())
             item.update(n.element.to_dict())
             schemas.append(item)
 
@@ -227,6 +250,8 @@ class Node():
         self.element = element
         self.parent = None
         self.order = order
+        self.derive = None
+        self.derived_count = 0
 
     def add_parent(self, parent):
         self.parent = parent
@@ -268,3 +293,32 @@ class Node():
                 parents.insert(0, p)
                 p = p.parent
             return parents
+
+    def add_derive(self, target):
+        if self.derive is not None and self.derive != target:
+            self.derive.update_derive_count(-1)
+        self.derive = target
+        target.update_derive_count(+1)
+    
+    def del_derive(self, target):
+        if self.derive==target:
+            self.derive.update_derive_count(-1)
+            self.derive = None
+    
+    def update_derive_count(self, diff:int):
+        self.derived_count += diff
+        if self.derived_count == 0:
+            if self.derive is not None:
+                self.derive.update_derive_count(-1)
+            self.derive = None
+
+    def get_derives(self):
+        derives = []
+        if self.derive is None:
+            return derives
+
+        d = self.derive
+        while d is not None and d not in derives:
+            derives.insert(0, d)
+            d = d.derive
+        return derives

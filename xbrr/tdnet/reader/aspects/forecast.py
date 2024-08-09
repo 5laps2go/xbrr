@@ -254,10 +254,12 @@ class Forecast(BaseParser):
             data = data[~data['consolidated']]
 
         # eliminate PreviousMember and filter YearDuration
-        current_year_query = '~member.str.contains("PreviousMember")&context.str.contains("YearDuration")'
+        current_year_query = '~member.str.contains("PreviousMember")&context.str.contains("Year.*Duration")'
         filtered = data.query(current_year_query, engine='python')
         # filter forecat members only
-        forecast_query = 'value!=""&(member.str.contains("ForecastMember")|member.str.contains("LowerMember")|member.str.contains("UpperMember"))'
+        forecast_query = 'value!=""'
+        if filtered[filtered['member']!=''].shape[0] > 0:
+            forecast_query += '&(member.str.contains("ForecastMember")|member.str.contains("LowerMember")|member.str.contains("UpperMember"))'
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
 

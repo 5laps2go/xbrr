@@ -44,18 +44,15 @@ class SchemaTree():
         for ref in xsd_xml.find_all('import'):
             ref_ns = ref['namespace']
             ref_xsduri = ref['schemaLocation']
-            self.namespace_uri[ref_ns] = ref_xsduri
+            self.namespace_uri[ref_ns] = urljoin(xsduri, ref_xsduri)
             self.read_import_tree(ref_ns, ref_xsduri)
 
     def find_kind_uri(self, kind:str, xsduri="") -> str:
         kind2linkbase = {'lab':'labelLinkbaseRef', 'cal':'calculationLinkbaseRef', 
                         'pre':'presentationLinkbaseRef', 'def':'definitionLinkbaseRef'}
         linkbase_type = kind2linkbase[kind]
-        try:
-            if xsduri=="": xsduri = os.path.basename(self.base_xsduri)
-            return self._find_linkbaseRef(linkbase_type, xsduri)
-        except Exception:
-            return ''
+        if xsduri=="": xsduri = os.path.basename(self.base_xsduri)
+        return self._find_linkbaseRef(linkbase_type, xsduri)
 
     def linkbaseRef_iterator(self, kind:str):
         kind2linkbase = {'lab':'labelLinkbaseRef', 'cal':'calculationLinkbaseRef', 
@@ -84,7 +81,7 @@ class SchemaTree():
                     continue
                 return pair[0]
 
-        raise Exception(f"linkbase ref does not exist.")
+        raise ImportError('linkbaseRefs Error:{} for {}'.format(doc_base, linkbase_type))
 
     def presentation_version(self) -> str:
         # 'http://www.xbrl.tdnet.info/jp/br/tdnet/r/ac/edjp/sm/2012-03-31/tse-acedjpsm-2012-03-31-presentation.xml'

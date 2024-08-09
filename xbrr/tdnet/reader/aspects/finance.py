@@ -19,6 +19,7 @@ class Finance(BaseParser):
             "real_estate_for_lease": "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock",
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
             "_fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
+            "fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
 
             "report_FY": "tse-o-di:TypeOfReports-Annual",
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
@@ -92,7 +93,8 @@ class Finance(BaseParser):
             textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1, 'consolidated': True}])
-        role = role[0]
+        roleYTD = [x for x in role if x.endswith('YTD')]
+        role = role[0] if not roleYTD else roleYTD[0]
         role_uri = self.reader.get_role(role).uri
 
         pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
@@ -125,7 +127,7 @@ class Finance(BaseParser):
         # eliminate non related context 'Quarter Duration'
         query = '~context.str.contains("Quarter")|~context.str.contains("Duration")'
         filtered = consolidated.query(query, engine='python')
-        if filtered.shape[0] < consolidated.shape[0]/2:
+        if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
             filtered = consolidated.query('~({})'.format(query), engine='python')
         # Exclude dimension member because NetAssets with variety of member attributes
         filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
@@ -197,17 +199,25 @@ class Finance(BaseParser):
             c = collections.Counter(indent_state)
             ks = sorted(c.keys(), key=int)
             return "-".join([str(c[x]) for x in ks])
-        def analyze_title(columns, thiscol, prevcol):
-            if any([x.text.strip().startswith('当') for x in columns]): #'当連結会計年度' in value
-                collen = sum([int(c.get('colspan','1')) for c in columns])
-                idx = 0
-                for c in columns:
-                    if c.text.strip().startswith('前'):
-                        prevcol = idx - collen
-                    elif c.text.strip().startswith('当'):
-                        thiscol = idx - collen
-                    idx = idx + int(c.get('colspan','1'))
+        def analyze_title(columns, thiscol, prevcol, this_str, prev_str):
+            collen = sum([int(c.get('colspan','1')) for c in columns])
+            idx = 0
+            for c in columns:
+                if c.text.strip().startswith('前') or c.text.strip().startswith(prev_str):
+                    prevcol = idx - collen
+                elif c.text.strip().startswith('当') or c.text.strip().startswith(this_str):
+                    thiscol = idx - collen
+                idx = idx + int(c.get('colspan','1'))
             return thiscol, prevcol
+        def analyze_column(label, columns, tc, pc):
+            def adjust(columns, idx):
+                for i in range(2):
+                    if columns[idx+i].text.strip().replace(',','').isdigit():
+                        return i
+                return 0
+            if len(label) > 2 and not any([c in label for c in '([/#,.])']):
+                return tc + adjust(columns, tc), pc + adjust(columns, pc)
+            return tc, pc
 
         thiscol, prevcol = -1, -2
         unit = '000000'
@@ -216,12 +226,14 @@ class Finance(BaseParser):
             if (thead := table.find('thead', recursive=False)):
                 for record in thead.find_all('tr', recursive=False):
                     columns = list(record.find_all('td', recursive=False))
-                    thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
+                    if len(values)==0:
+                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
             tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
             for record in tbody.find_all('tr', recursive=False):
                 columns = list(record.find_all('td', recursive=False))
                 if len(columns) < 3: continue
                 label, margin = label_margin(columns)
+                if len(values)==0: thiscol,prevcol = analyze_column(label, columns, thiscol, prevcol)
                 value = get_value(columns[thiscol])
 
                 if label != "" and value == "": # skip headding part
@@ -256,13 +268,16 @@ class Finance(BaseParser):
                         'consolidated': True
                     })
                 else:
-                    assert label=='' or value=='' or  '円' in value or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
-                    if '百万円' in value: # 単位：百万円 金額（百万円）
+                    # assert label=='' or value=='' or any(['円' in x.text for x in columns]) or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
+                    if any(['百万円' in x.text for x in columns]): # 単位：百万円 金額（百万円）
                         unit = '000000'
-                    elif '千円' in value:
+                    elif any(['千円' in x.text for x in columns]):
                         unit = '000'
-                    elif '単位：円' in value or '円' in value:
+                    elif any(['円' in x.text for x in columns]):
                         unit = ''
                     # if value.startswith('当'): #'当連結会計年度' in value
-                    thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
+                    if len(values)==0:
+                        this_str = self.fiscal_year_end_date.value[0:4]
+                        prev_str = str(int(this_str)-1)
+                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
         return pd.DataFrame(values).drop_duplicates(subset=['label', 'context'], keep='first')

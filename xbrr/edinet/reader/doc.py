@@ -45,9 +45,9 @@ class Doc(XbrlDoc):
     def default_linkbase(self) -> dict:
         return {
             'doc': 'pre', # document kind for the order of financial statements
-            'link_node': 'link:presentationLink',
-            'arc_node': 'link:presentationArc',
-            'roleRef': 'link:roleRef',
+            'link_node': 'presentationLink',
+            'arc_node': 'presentationArc',
+            'roleRef': 'roleRef',
             'arc_role': 'parent-child'
         }
 

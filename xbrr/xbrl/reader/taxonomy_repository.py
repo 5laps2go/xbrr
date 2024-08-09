@@ -49,6 +49,7 @@ class TaxonomyRepository():
 
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
+        # assert os.path.isfile(uri) or uri.startswith('http:'), 'no xsduri found: {}'.format(uri)
         if not uri.startswith('http'):
             return self.read_file(uri)
         return self.read_uri_taxonomy(uri)

@@ -18,10 +18,10 @@ class RoleSchema(BaseElementSchema):
         return self._label
 
     @classmethod
-    def read_role_ref(cls, reader, xml, link_node, base_xsduri = None) -> dict[str,'RoleSchema']:
+    def read_role_ref(cls, reader, xml, link_node, roleRef, base_xsduri = None) -> dict[str,'RoleSchema']:
         link_node_roles = [x["xlink:role"].rsplit("/")[-1] for x in xml.find_all(link_node)]
         role_dic = {}
-        for element in xml.find_all('roleRef'):
+        for element in xml.find_all(roleRef):
             role_ref = element["xlink:href"].split("#")[-1]
             role_name = element["roleURI"].rsplit("/")[-1]
 
