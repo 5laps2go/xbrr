@@ -37,6 +37,13 @@ class Finance(BaseParser):
     @property
     def use_IFRS(self):
         return self.accounting_standards.value == 'IFRS'
+    
+    @property
+    def finantial_standard(self): # standard: US, JP, IFRS, unknown
+        standard = self.accounting_standards.value
+        if standard is not None:
+            return standard.split(' ')[0]
+        return 'unknown'
 
     @property
     def fiscal_period_kind(self):
@@ -113,6 +120,7 @@ class Finance(BaseParser):
         return cf if not latest_filter else self.__filter_accounting_items(cf)
 
     def __filter_out_str(self):
+        assert self.consolidated == self.reader.xbrl_doc.consolidated
         filter_out_str = 'NonConsolidated' if self.consolidated\
             else '(?<!Non)Consolidated'
         return filter_out_str
@@ -129,7 +137,9 @@ class Finance(BaseParser):
         filtered = consolidated.query(query, engine='python')
         if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
             filtered = consolidated.query('~({})'.format(query), engine='python')
-        # Exclude dimension member because NetAssets with variety of member attributes
+        # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
+        filtered.loc[filtered['member']!='','name']=filtered['member']
+        filtered.loc[filtered['member']!='','depth']='+0'
         filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
         return filtered
 

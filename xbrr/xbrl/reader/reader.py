@@ -1,9 +1,11 @@
 import importlib.util
 import os
+import itertools
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 from urllib.parse import urljoin
+from logging import getLogger
 
 from bs4 import BeautifulSoup
 
@@ -34,6 +36,9 @@ class Reader(BaseReader):
 
         self.schema_dic = self.taxonomy_repo.get_schema_dicts(self._namespace_dic)
         self.schema_tree = SchemaTree(self, xbrl_doc.find_path('xsd'))
+
+        self.logger = getLogger(__name__)
+        self.debug_print = []
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy_repo, )
@@ -101,12 +106,16 @@ class Reader(BaseReader):
 
         nodes = {}
         linkbase = self.xbrl_doc.default_linkbase
+        self.logger.debug("-------------- Section presentation -----------------")
         for docuri in self.schema_tree.linkbaseRef_iterator(linkbase['doc']):
             self.make_node_tree(nodes, role_name, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
         if use_cal_link:
+            self.logger.debug("--------------- Section calculation -------------------")
             for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
                 self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item")
-        return self.flatten_to_schemas(nodes)
+            self.make_node_tree(nodes, role_name, os.path.join(self.save_dir, "calc-patch.xml"), "calculationLink", "calculationArc", "summation-item")
+            self.eliminate_non_value_calc_leaf(nodes)
+        return self.flatten_to_schemas(nodes, use_cal_link)
 
     def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role):
         def get_name(loc):
@@ -127,62 +136,148 @@ class Reader(BaseReader):
         # for role in doc.select(f"linkbase > {link_node}[role=\"{self.get_role(role_name).uri}\"]"): # doc.find_all(linknode, {"xlink:role": self.get_role(role_name).uri}):
         for role in doc.find_all(link_node, {"xlink:role": self.get_role(role_name).uri}):
             for i, arc in enumerate(role.find_all(arc_node, recursive=False)):
+                assert arc["xlink:arcrole"].split('/')[-1] in ['parent-child','summation-item','domain-member', 'dimension-domain', 'all', 'hypercube-dimension']
                 if not arc["xlink:arcrole"].endswith(arc_role):
                     continue
 
+                arctype = arc_node.split(':')[-1]
                 parent = locs[arc["xlink:from"]]
                 child = locs[arc["xlink:to"]]
 
-                if arc.get("use", "") == "prohibited":
-                    if arc_node.endswith("calculationArc"):
-                        nodes[get_name(child)].del_derive(nodes[get_name(parent)])
-                    # print("delete {}:{} --> {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child)))
-                    continue
-
+                # calc-patch
+                if parent["xlink:href"].startswith("calc-patch"):
+                    if (get_name(parent) not in nodes or get_name(child) not in nodes) or\
+                        nodes[get_name(child)].has_derive(nodes[get_name(parent)]):
+                        continue
+                    self.debug_print.append("calc-patch applied!!!")
+                
                 if get_name(child) not in nodes:
                     xsduri = get_absxsduri(docuri, child["xlink:href"])
                     c = ElementSchema.create_from_reference(self, xsduri)
-                    nodes[get_name(child)] = Node(c, arc["order"])
-                elif not arc_node.endswith("calculationArc"):
-                    nodes[get_name(child)].order = arc["order"]
+                    nodes[get_name(child)] = Node(c)
 
                 if get_name(parent) not in nodes:
                     xsduri = get_absxsduri(docuri, parent["xlink:href"])
                     p = ElementSchema.create_from_reference(self, xsduri)
-                    nodes[get_name(parent)] = Node(p, i)
+                    nodes[get_name(parent)] = Node(p)
 
-                # print("{}:{} --> {}:w{}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0)))
-                if arc_node.endswith("calculationArc"):
-                    if get_name(child) in self._value_dic:
-                        nodes[get_name(child)].add_derive(nodes[get_name(parent)])
+                # preserve presentation/calculation struct
+                if get_name(child) in self.preserve_struct[arctype]:
+                    if get_name(parent) in self.preserve_struct[arctype][get_name(child)]:
+                        self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
+                        if arctype=='presentationArc':
+                            nodes[get_name(child)].preserve_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
+                        if arctype=='calculationArc':
+                            nodes[get_name(child)].preserve_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
+                    else:
+                        self.debug_print.append("{} -> {}: o{} p{} {}".format(get_name(parent), get_name(child), arc.get('order','0'), arc.get('priority','0'),arc.get('use','')))
+                    continue
+
+                if arctype == "calculationArc":
+                    self.logger.debug("{}:{} --> {}:w{} p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
+                    nodes[get_name(child)].add_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
                 else:
-                    nodes[get_name(child)].add_parent(nodes[get_name(parent)])
+                    self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
+                    nodes[get_name(child)].add_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
 
-    def flatten_to_schemas(self, nodes):
+    preserve_struct = {
+        # PL
+        'calculationArc': {
+            # PL
+            'jpfr-t-cte_GrossProfit': 'jpfr-t-cte_OperatingIncome',
+            'jpfr-t-cte_SellingGeneralAndAdministrativeExpenses': 'jpfr-t-cte_OperatingIncome',
+            'jpfr-t-cte_OperatingIncome': 'jpfr-t-cte_OrdinaryIncome',
+            'jpfr-t-cte_NonOperatingIncome': 'jpfr-t-cte_OrdinaryIncome',
+            'jpfr-t-cte_NonOperatingExpenses': 'jpfr-t-cte_OrdinaryIncome',
+            'jpfr-t-cte_OrdinaryIncome': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
+            'jpfr-t-cte_ExtraordinaryIncome': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
+            'jpfr-t-cte_ExtraordinaryLoss': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
+            'jpfr-t-cte_IncomeBeforeIncomeTaxes': 'jpfr-t-cte_IncomeBeforeMinorityInterests',
+            'jpfr-t-cte_IncomeBeforeMinorityInterests': 'jpfr-t-cte_NetIncome',
+            # BS
+            'jpfr-t-cte_CurrentLiabilities': 'jpfr-t-cte_Liabilities',
+            'jpfr-t-cte_NoncurrentLiabilities': 'jpfr-t-cte_Liabilities',
+            'jpfr-t-cte_Liabilities': 'jpfr-t-cte_LiabilitiesAndNetAssets',
+        },
+
+        # BS
+        'presentationArc': {
+            # PL
+            'jpfr-t-cte_OperatingIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_NonOperatingIncomeAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_NonOperatingExpensesAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_OrdinaryIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_ExtraordinaryIncomeAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_ExtraordinaryLossAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_IncomeBeforeIncomeTaxes': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            'jpfr-t-cte_NetIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
+            # BS
+            'jpfr-t-cte_AssetsAbstract': ['jpfr-t-cte_BalanceSheetsAbstract'],
+                'jpfr-t-cte_CurrentAssetsAbstract': ['jpfr-t-cte_AssetsAbstract'],
+                'jpfr-t-cte_CurrentAssets': ['jpfr-t-cte_CurrentAssetsAbstract','jpfr-t-cte_AssetsAbstract'],
+                'jpfr-t-cte_NoncurrentAssetsAbstract': ['jpfr-t-cte_AssetsAbstract'],
+                'jpfr-t-cte_NoncurrentAssets': ['jpfr-t-cte_NoncurrentAssetsAbstract','jpfr-t-cte_AssetsAbstract'],
+                'jpfr-t-cte_Assets':  ['jpfr-t-cte_AssetsAbstract'],
+            'jpfr-t-cte_LiabilitiesAbstract': ['jpfr-t-cte_BalanceSheetsAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+                'jpfr-t-cte_CurrentLiabilitiesAbstract': ['jpfr-t-cte_LiabilitiesAbstract'],
+                'jpfr-t-cte_CurrentLiabilities': ['jpfr-t-cte_CurrentLiabilitiesAbstract','jpfr-t-cte_LiabilitiesAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+                'jpfr-t-cte_NoncurrentLiabilitiesAbstract': ['jpfr-t-cte_LiabilitiesAbstract'],
+                'jpfr-t-cte_NoncurrentLiabilities': ['jpfr-t-cte_NoncurrentLiabilitiesAbstract','jpfr-t-cte_LiabilitiesAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+                'jpfr-t-cte_ReservesUnderTheSpecialLawsAbstract1': ['jpfr-t-cte_LiabilitiesAbstract'],
+                'jpfr-t-cte_ReservesUnderTheSpecialLawsAbstract2': ['jpfr-t-cte_LiabilitiesAbstract'],
+                'jpfr-t-cte_Liabilities': ['jpfr-t-cte_LiabilitiesAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+            'jpfr-t-cte_NetAssetsAbstract':  ['jpfr-t-cte_BalanceSheetsAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+                'jpfr-t-cte_MinorityInterests': ['jpfr-t-cte_NetAssetsAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+                'jpfr-t-cte_NetAssets': ['jpfr-t-cte_NetAssetsAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
+        },
+        # FC
+        'definitionArc': {}
+    }
+
+    def eliminate_non_value_calc_leaf(self, nodes):
+        # nodes preserves child, parent order (derived, derives order)
+        for name in nodes:
+            n = nodes[name]
+            if n.derived_count==0 and name not in self._value_dic:
+                n.remove_derive()
+
+    def flatten_to_schemas(self, nodes, use_cal_link):
         schemas = []
+        Node.init_derive_path()
 
         parent_depth = -1
         for name in nodes:
             if parent_depth < nodes[name].depth:
                 parent_depth = nodes[name].depth
 
-        for name in nodes:
-            n = nodes[name]
+        for name0 in nodes:
+            n = nodes[name0]
+            if n.element.abstract=='true':
+                continue
             item = {}
             parents = n.get_parents()
-            parents = parents + ([""] * (parent_depth - len(parents)))
+            if n.is_leaf:
+                parents = parents + ([""] * (parent_depth - len(parents)))
+                empty_order = float(n.order)
+            else:
+                parents = parents + [n] + ([""] * (parent_depth - len(parents) - 1))
+                empty_order = 99.0
 
             for i, p in zip(reversed(range(parent_depth)), parents):
-                name = p if isinstance(p, str) else p.name
-                label = p if isinstance(p, str) else p.label
-                # print order: p1(c1, c2) => c1(=p1.order), c2(=p1.order), p1(=p1order+0.1)
-                order = float(n.order)+0.1 if isinstance(p, str) else float(p.order)
+                name = p.name if not isinstance(p, str) else p
+                label = p.label if not isinstance(p, str) else p
+                order = float(p.order) if not isinstance(p, str) else empty_order
                 item[f"parent_{i}"] = name
                 item[f"parent_{i}_label"] = label
                 item[f"parent_{i}_order"] = order
 
-            item["order"] = float(n.order)
-            item["depth"] = len(n.get_derives())
+            item["order"] = empty_order
+            if use_cal_link:
+                item["depth"] = n.get_derive_path()
+                if item['depth'] in ['+','-']: continue
+            else:
+                item["depth"] = str(len(n.get_derive_chain()))
+
             item.update(n.element.to_dict())
             schemas.append(item)
 
@@ -205,6 +300,24 @@ class Reader(BaseReader):
         Returns:
             xbrl_data -- Saved XbRL values.
         """
+        def calc_value(row, dict):
+            def filter(x, base):
+                return x['depth'].endswith(base) and x['depth'][0] in ['+','-']
+            results = []
+            inputs = [x for x in dict if filter(x, row['depth'])]
+            contexts = [(x['context'],x['member']) for x in inputs]
+            for context in sorted(set(contexts), key=contexts.index):
+                item = row.to_dict()
+                value = 0
+                for input in [x for x in inputs if x['context']==context[0] and x['member']==context[1]]:
+                    for k,v in [(k,v) for k,v in input.items() if k not in item]:
+                        item[k] = v
+                    add = int(input['value']) if input['value']!='NaN' else 0
+                    value += add if input['depth'][0] == '+' else -add
+                item['value'] = str(value)
+                results.append(item)
+            return results
+
         schemas = self.read_schema_by_role(role_link, use_cal_link)
         if len(schemas) == 0:
             return None
@@ -213,10 +326,11 @@ class Reader(BaseReader):
         for i, row in schemas.iterrows():
             tag_name = row['name']
             if tag_name not in self._value_dic:
+                xbrl_data += calc_value(row, xbrl_data)
                 continue
 
             results = []
-            for value in self._value_dic[tag_name]:
+            for value in sorted(self._value_dic[tag_name], reverse=True, key=lambda x: x.context_ref['id']):
                 if not value.context.startswith(scope):
                     continue
                 item = row.to_dict()
@@ -231,6 +345,11 @@ class Reader(BaseReader):
                 xbrl_data += results
 
         xbrl_data = pd.DataFrame(xbrl_data)
+        if self.debug_print:
+            # pd.set_option('display.width', 1000)
+            self.logger.info('\n'.join(list(set(self.debug_print))))
+            # self.logger.info(xbrl_data[['name','value','depth', 'consolidated','label']])
+            self.debug_print = []
         return xbrl_data
 
     def find_value_names(self, candidates:List[str]) -> List[str]:
@@ -249,12 +368,49 @@ class Node():
     def __init__(self, element, order=0):
         self.element = element
         self.parent = None
-        self.order = order
-        self.derive = None
+        # self.order = order
+        self.priority = ' '
+        self.prohibited = None # (parent, order, priority)
+        self.parents = []       # e: {'parent':Node, 'order': str, 'priority': str}
+        self.children_count = 0
+        self.derives = []       # e: {'target':Node, 'use':str, 'priority':str, 'weight':str}
         self.derived_count = 0
 
-    def add_parent(self, parent):
-        self.parent = parent
+    @property
+    def order(self):
+        if not self.parents:
+            return 0
+        if len(self.parents) > 1:
+            self.debug_print = 'more than two parents found at {}: {}'.format(self.name, [x['parent'].name for x in self.parents])
+        return self.parents[0]['order']
+    
+    def add_parent(self, parent, use:str, priority:str, order:str ):
+        if use=='prohibited':
+            self.prohibited = {'parent':parent, 'order':order, 'priority':priority}
+            for x in [x for x in self.parents if parent==x['parent'] and priority>x['priority'] and float(order)==float(x['order'])]:
+                self.parents.remove(x)
+                x['parent'].children_count -= 1
+            return
+        if self.prohibited is not None:
+            if parent == self.prohibited['parent'] and float(order) == float(self.prohibited['order'])\
+                and priority < self.prohibited['priority']:
+                return
+
+        self.parents.append({'parent':parent, 'priority':priority, 'order':order})
+        parent.children_count += 1
+
+    def preserve_parent(self, parent, use:str, priority:str, order:str ):
+        if use=='prohibited':
+            self.prohibited = {'parent':parent, 'order':order, 'priority':priority}
+        else:
+            self.parents.append({'parent':parent, 'priority':priority, 'order':order})
+            parent.children_count += 1
+
+        if self.prohibited is not None and len(self.parents) > 1:
+            for x in [x for x in self.parents if self.prohibited['parent']==x['parent']
+                      and self.prohibited['priority']>x['priority'] and float(self.prohibited['order'])==float(x['order'])]:
+                self.parents.remove(x)
+                x['parent'].children_count -= 1
 
     @property
     def name(self):
@@ -268,6 +424,10 @@ class Node():
     def reference(self):
         return self.element.reference
 
+    @property
+    def is_leaf(self):
+        return self.children_count == 0
+    
     @property
     def depth(self):
         return len(self.get_parents())
@@ -285,40 +445,99 @@ class Node():
 
     def get_parents(self):
         parents = []
-        if self.parent is None:
+        if len(self.parents) == 0:
             return parents
         else:
-            p = self.parent
-            while p is not None and p not in parents:
-                parents.insert(0, p)
-                p = p.parent
+            ps = [x['parent'] for x in self.parents]
+            while len(ps) != 0 and ps[0] not in parents:
+                parents.insert(0, ps[0])
+                ps = [x['parent'] for x in ps[0].parents]
             return parents
 
-    def add_derive(self, target):
-        if self.derive is not None and self.derive != target:
-            self.derive.update_derive_count(-1)
-        self.derive = target
-        target.update_derive_count(+1)
+    def add_derive(self, target, use:str, priority:str, order:str, weight:str):
+        target_derives = [x for x in self.derives if x['target']==target and float(x['order'])==float(order)]
+        for x in target_derives:
+            if priority > x['priority']:
+                self.derives.remove(x)
+                if use!='prohibited':
+                    self.derives.append({'target':target, 'use':use, 'priority':priority, 'order':order, 'weight':weight})
+                target.update_derive_count(+1 if use!='prohibited' else -1)
+        if len(target_derives)==0:
+            self.derives.append({'target':target, 'use':use, 'priority':priority, 'order':order, 'weight':weight})
+            if use!='prohibited': target.update_derive_count(+1)
     
-    def del_derive(self, target):
-        if self.derive==target:
-            self.derive.update_derive_count(-1)
-            self.derive = None
+    def preserve_derive(self, target, use:str, priority:str, order:str, weight:str):
+        self.derives.append({'target':target, 'use':use, 'priority':priority, 'order':order, 'weight':weight})
+        target.update_derive_count(+1 if use!='prohibited' else 0)
+        prohibited_derives = [x for x in self.derives if x['target']==target and x['use']=='prohibited']
+        for p in prohibited_derives:
+            target_derives = [x for x in self.derives if x['target']==p['target'] and x['use']!='prohibited']
+            if len(target_derives) > 1:
+                for x in target_derives:
+                    if p['order']==x['order'] and p['priority']>x['priority']:
+                        self.derives.remove(p)
+                        self.derives.remove(x)
+                        p['target'].update_derive_count(-1)
+
+            if target_derives and \
+                any([x['order']==p['order']and x['priority']>=p['priority'] for x in target_derives]):
+                self.derives.remove(p)
     
+    def remove_derive(self):
+        for x in [x for x in self.derives if x['use']!='prohibited']:
+            x['target'].update_derive_count(-1)
+        self.derives = []
+
     def update_derive_count(self, diff:int):
         self.derived_count += diff
-        if self.derived_count == 0:
-            if self.derive is not None:
-                self.derive.update_derive_count(-1)
-            self.derive = None
+        # if self.derived_count == 0:
+        #     actives = [x for x in self.derives if x.get('use','')!='prohibited']
+        #     if len(actives) > 0:
+        #         assert len(actives) == 1
+        #         actives[0]['target'].update_derive_count(-1)
+        #         self.derives.remove(actives[0])
 
-    def get_derives(self):
-        derives = []
-        if self.derive is None:
-            return derives
+    def get_derive_chain(self):
+        active_chains = [[x['target'], *x['target'].get_derive_chain()] for x
+            in self.derives if x.get('use','')!='prohibited']
+        sorted_chains = sorted(active_chains, key=len, reverse=True)
+        return sorted_chains[0] if len(sorted_chains) > 0 else []
 
-        d = self.derive
-        while d is not None and d not in derives:
-            derives.insert(0, d)
-            d = d.derive
-        return derives
+    def has_derive(self, target):
+        derives = [x['target'] for x in self.derives if x['use']!='prohibited']
+        if target in derives:
+            return True
+        for derive in derives:
+            if derive.has_derive(target):
+                return True
+        return False
+
+    children_list = {}
+    base_node = None
+    def get_child_index(self, child):
+        children = Node.children_list.get(self, [])
+        if child not in children:
+            children.append(child)
+            Node.children_list[self] = children
+        child_index = children.index(child)
+        return '123456789abcdefghijklmnopqrstuvwxyz'[child_index] if child_index < 35 else '0'
+
+    def get_derive_subpath(self):
+        if len(self.derives)==0 and self.element.data_type in ['monetary']:
+            return [(Node.base_node.get_child_index(self),'1')]
+        active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target'].get_derive_subpath()] for x
+            in self.derives if x.get('use','')!='prohibited']
+        sorted_chains = sorted(active_chains, key=len, reverse=True)
+        return sorted_chains[0] if len(sorted_chains) > 0 else []
+
+    @classmethod
+    def init_derive_path(cls):
+        Node.children_list = {}
+        Node.base_node = Node(None)
+
+    def get_derive_path(self):
+        path = self.get_derive_subpath()
+        sign = any([x[1].startswith('-') for x in path])
+        sign_str = '-' if sign else '+'
+        path_str = ''.join([x[0] for x in path])
+        return sign_str + path_str if self.derived_count==0 else path_str

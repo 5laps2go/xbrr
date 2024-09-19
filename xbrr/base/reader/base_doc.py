@@ -35,6 +35,10 @@ class BaseDoc():
         raise NotImplementedError("You have to implement consolidated.")
     
     @property
+    def accounting_standard(self) -> str:
+        raise NotImplementedError("You have to implement accounting_standard.")
+    
+    @property
     def default_linkbase(self) -> dict[str, str]:
         raise NotImplementedError("You have to implement default_linkbase.")
     
