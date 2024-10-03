@@ -259,7 +259,7 @@ class Forecast(BaseParser):
         # filter forecat members only
         forecast_query = 'value!=""'
         if filtered[filtered['member']!=''].shape[0] > 0:
-            forecast_query += '&(member.str.contains("ForecastMember")|member.str.contains("LowerMember")|member.str.contains("UpperMember"))'
+            forecast_query += '&(member.str.contains("Forecast")|member.str.contains("Lower")|member.str.contains("Upper"))'
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
 

@@ -120,6 +120,12 @@ class Doc(XbrlDoc):
             v = os.path.basename(self.file_spec).split('-')
             date = datetime.strptime("%s-%s-%s" % (v[3], v[4], v[5]), "%Y-%m-%d")
             return date
+        elif 'summary' == self.xbrl_kind:
+            # Summary/tse-acedjpsm-36450-20210714336450
+            #          0      1       2         3 
+            v = os.path.basename(self.file_spec).split('-')
+            date = datetime.strptime(v[3][0:8], "%Y%m%d")
+            return date
         else:
             raise LookupError("Fiscal year date is not encoded")
 
