@@ -120,12 +120,12 @@ class Doc(XbrlDoc):
             v = os.path.basename(self.file_spec).split('-')
             date = datetime.strptime("%s-%s-%s" % (v[3], v[4], v[5]), "%Y-%m-%d")
             return date
-        elif 'summary' == self.xbrl_kind:
-            # Summary/tse-acedjpsm-36450-20210714336450
-            #          0      1       2         3 
-            v = os.path.basename(self.file_spec).split('-')
-            date = datetime.strptime(v[3][0:8], "%Y%m%d")
-            return date
+        # elif 'summary' == self.xbrl_kind:
+        #     # Summary/tse-acedjpsm-36450-20210714336450
+        #     #          0      1       2         3 
+        #     v = os.path.basename(self.file_spec).split('-')
+        #     date = datetime.strptime(v[3][0:8], "%Y%m%d")
+        #     return date
         else:
             raise LookupError("Fiscal year date is not encoded")
 
@@ -157,7 +157,7 @@ class Doc(XbrlDoc):
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
-            if 'rvfc' in v[1]:  # ./tse-rvfc-36450-20210714336450 for correction document
+            if v[1] in ['rrfc','rvfc','rvdf']:  # rrfc	配当金修正, rvfc	業績予想修正, rvdf	配当予想のお知らせ
                 return True
             return test_consolidated(v[1][1])
         else:
@@ -174,8 +174,8 @@ class Doc(XbrlDoc):
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
-            if 'rvfc' in v[1]:  # ./tse-rvfc-36450-20210714336450 for correction document
-                return True
+            if v[1] in ['rrfc','rvfc','rvdf']:  # rrfc	配当金修正, rvfc	業績予想修正, rvdf	配当予想のお知らせ
+                return ''
             return v[1][4:6] if len(v[1])==8 else ''
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")

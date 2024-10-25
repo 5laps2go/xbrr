@@ -100,7 +100,7 @@ class Reader(BaseReader):
         laburi = self.schema_tree.find_kind_uri('lab', xsduri)
         return laburi
 
-    def read_schema_by_role(self, role_name, use_cal_link=False):
+    def read_schema_by_role(self, role_name, preserve_pre:Dict, preserve_cal:Dict):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
@@ -108,16 +108,23 @@ class Reader(BaseReader):
         linkbase = self.xbrl_doc.default_linkbase
         self.logger.debug("-------------- Section presentation -----------------")
         for docuri in self.schema_tree.linkbaseRef_iterator(linkbase['doc']):
-            self.make_node_tree(nodes, role_name, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
-        if use_cal_link:
-            self.logger.debug("--------------- Section calculation -------------------")
-            for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
-                self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item")
-            self.make_node_tree(nodes, role_name, os.path.join(self.save_dir, "calc-patch.xml"), "calculationLink", "calculationArc", "summation-item")
-            self.eliminate_non_value_calc_leaf(nodes)
-        return self.flatten_to_schemas(nodes, use_cal_link)
+            self.make_node_tree(nodes, role_name, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'], preserve_pre)
 
-    def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role):
+        if list(self.schema_tree.linkbaseRef_iterator('cal')) != []:
+            self.logger.debug("-------------- Section calculation ------------------")
+            for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
+                self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item", preserve_cal)
+            self.patch_calc_node_tree(nodes, role_name, "calc-patch.xml")
+        return self.flatten_to_schemas(nodes)
+    
+    def patch_calc_node_tree(self, nodes, role_name, patch):
+        self.make_node_tree(nodes, role_name, os.path.join(self.save_dir, patch), "calculationLink", "calculationArc", "summation-item", {})
+        self.fix_missing_calc_link(nodes)
+        self.eliminate_non_value_calc_leaf(nodes)
+
+    def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role, preserve_dict):
+        def t(name):
+            return name.split('_')[-1]
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]
         def get_absxsduri(docuri, xsduri):
@@ -162,8 +169,8 @@ class Reader(BaseReader):
                     nodes[get_name(parent)] = Node(p)
 
                 # preserve presentation/calculation struct
-                if get_name(child) in self.preserve_struct[arctype]:
-                    if get_name(parent) in self.preserve_struct[arctype][get_name(child)]:
+                if t(get_name(child)) in preserve_dict:
+                    if t(get_name(parent)) in preserve_dict[t(get_name(child))]:
                         self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                         if arctype=='presentationArc':
                             nodes[get_name(child)].preserve_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
@@ -180,58 +187,29 @@ class Reader(BaseReader):
                     self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                     nodes[get_name(child)].add_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
 
-    preserve_struct = {
-        # PL
-        'calculationArc': {
-            # PL
-            'jpfr-t-cte_GrossProfit': 'jpfr-t-cte_OperatingIncome',
-            'jpfr-t-cte_SellingGeneralAndAdministrativeExpenses': 'jpfr-t-cte_OperatingIncome',
-            'jpfr-t-cte_OperatingIncome': 'jpfr-t-cte_OrdinaryIncome',
-            'jpfr-t-cte_NonOperatingIncome': 'jpfr-t-cte_OrdinaryIncome',
-            'jpfr-t-cte_NonOperatingExpenses': 'jpfr-t-cte_OrdinaryIncome',
-            'jpfr-t-cte_OrdinaryIncome': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
-            'jpfr-t-cte_ExtraordinaryIncome': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
-            'jpfr-t-cte_ExtraordinaryLoss': 'jpfr-t-cte_IncomeBeforeIncomeTaxes',
-            'jpfr-t-cte_IncomeBeforeIncomeTaxes': 'jpfr-t-cte_IncomeBeforeMinorityInterests',
-            'jpfr-t-cte_IncomeBeforeMinorityInterests': 'jpfr-t-cte_NetIncome',
-            # BS
-            'jpfr-t-cte_CurrentLiabilities': 'jpfr-t-cte_Liabilities',
-            'jpfr-t-cte_NoncurrentLiabilities': 'jpfr-t-cte_Liabilities',
-            'jpfr-t-cte_Liabilities': 'jpfr-t-cte_LiabilitiesAndNetAssets',
-        },
+    def fix_missing_calc_link(self, nodes):
+        def test_derived_node(target:Node, parent:Node, order:str) -> bool:
+            while target.parents:
+                p_dict = target.parents[0]
+                target = p_dict['parent']
+                if target==parent and int(p_dict['order']) < int(order):
+                    return True
+            return False
+        def missing_derived_orphans(fnode:Node, order:str):
+            parent = fnode.parents[0]['parent']
+            leafs = [k for (k,v) in nodes.items() if v.children_count==0 and len(v.derives)==0]
+            missings = [x for x in leafs if test_derived_node(nodes[x], parent, order)]
+            return missings
+        for missing in [k for (k,v) in nodes.items() if v.children_count==0 and v.derived_count==0]:
+            if missing.split('_')[-1] not in self.missing_calc_link:
+                continue
+            for orphan in missing_derived_orphans(nodes[missing], nodes[missing].parents[0]['order']):
+                w = '-1' if 'Expense' in orphan else '1'
+                nodes[orphan].add_derive(nodes[missing], '', '0', '1', w)
 
-        # BS
-        'presentationArc': {
-            # PL
-            'jpfr-t-cte_OperatingIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_NonOperatingIncomeAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_NonOperatingExpensesAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_OrdinaryIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_ExtraordinaryIncomeAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_ExtraordinaryLossAbstract': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_IncomeBeforeIncomeTaxes': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            'jpfr-t-cte_NetIncome': 'jpfr-t-cte_StatementsOfIncomeAbstract',
-            # BS
-            'jpfr-t-cte_AssetsAbstract': ['jpfr-t-cte_BalanceSheetsAbstract'],
-                'jpfr-t-cte_CurrentAssetsAbstract': ['jpfr-t-cte_AssetsAbstract'],
-                'jpfr-t-cte_CurrentAssets': ['jpfr-t-cte_CurrentAssetsAbstract','jpfr-t-cte_AssetsAbstract'],
-                'jpfr-t-cte_NoncurrentAssetsAbstract': ['jpfr-t-cte_AssetsAbstract'],
-                'jpfr-t-cte_NoncurrentAssets': ['jpfr-t-cte_NoncurrentAssetsAbstract','jpfr-t-cte_AssetsAbstract'],
-                'jpfr-t-cte_Assets':  ['jpfr-t-cte_AssetsAbstract'],
-            'jpfr-t-cte_LiabilitiesAbstract': ['jpfr-t-cte_BalanceSheetsAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-                'jpfr-t-cte_CurrentLiabilitiesAbstract': ['jpfr-t-cte_LiabilitiesAbstract'],
-                'jpfr-t-cte_CurrentLiabilities': ['jpfr-t-cte_CurrentLiabilitiesAbstract','jpfr-t-cte_LiabilitiesAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-                'jpfr-t-cte_NoncurrentLiabilitiesAbstract': ['jpfr-t-cte_LiabilitiesAbstract'],
-                'jpfr-t-cte_NoncurrentLiabilities': ['jpfr-t-cte_NoncurrentLiabilitiesAbstract','jpfr-t-cte_LiabilitiesAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-                'jpfr-t-cte_ReservesUnderTheSpecialLawsAbstract1': ['jpfr-t-cte_LiabilitiesAbstract'],
-                'jpfr-t-cte_ReservesUnderTheSpecialLawsAbstract2': ['jpfr-t-cte_LiabilitiesAbstract'],
-                'jpfr-t-cte_Liabilities': ['jpfr-t-cte_LiabilitiesAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-            'jpfr-t-cte_NetAssetsAbstract':  ['jpfr-t-cte_BalanceSheetsAbstract','jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-                'jpfr-t-cte_MinorityInterests': ['jpfr-t-cte_NetAssetsAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-                'jpfr-t-cte_NetAssets': ['jpfr-t-cte_NetAssetsAbstract', 'jpfr-t-ele_LiabilitiesAndNetAssetsAbstractELE'],
-        },
-        # FC
-        'definitionArc': {}
+    missing_calc_link = {
+        'OperatingIncome': ['GrossProfit', 'SellingGeneralAndAdministrativeExpenses'],
+        'OrdinaryIncome': ['OperatingIncome'],
     }
 
     def eliminate_non_value_calc_leaf(self, nodes):
@@ -241,7 +219,7 @@ class Reader(BaseReader):
             if n.derived_count==0 and name not in self._value_dic:
                 n.remove_derive()
 
-    def flatten_to_schemas(self, nodes, use_cal_link):
+    def flatten_to_schemas(self, nodes):
         schemas = []
         Node.init_derive_path()
 
@@ -272,11 +250,7 @@ class Reader(BaseReader):
                 item[f"parent_{i}_order"] = order
 
             item["order"] = empty_order
-            if use_cal_link:
-                item["depth"] = n.get_derive_path()
-                if item['depth'] in ['+','-']: continue
-            else:
-                item["depth"] = str(len(n.get_derive_chain()))
+            item["depth"] = n.get_derive_path()
 
             item.update(n.element.to_dict())
             schemas.append(item)
@@ -289,27 +263,32 @@ class Reader(BaseReader):
         return schemas
 
 
-    def read_value_by_role(self, role_link:str, scope:str = "", use_cal_link:bool = False):
+    def read_value_by_role(self, role_link:str, preserve_pre:Dict = {}, preserve_cal:Dict = {}, scope:str = ""):
         """Read XBRL values in a dataframe which are specified by role and/or context.
 
         Arguments:
             role_link {str} -- role name or role uri
         Keyword Arguments:
             scope {str} -- context name prefix, eg "Current" for "Current*" (default: {""} for everything)
-            use_cal_link: calculation link used after presentation link (default: {False})
+            preserve_pre: presentation structure to avoid xbrl data errors
+            preserve_cal: calculation structure to avoid xbrl data errors
         Returns:
-            xbrl_data -- Saved XbRL values.
+            xbrl_df -- Saved XbRL dataframe.
         """
         def calc_value(row, dict):
             def filter(x, base):
                 return x['depth'].endswith(base) and x['depth'][0] in ['+','-']
             results = []
+            if row['depth'][0] in ['+','-']:
+                return results
             inputs = [x for x in dict if filter(x, row['depth'])]
             contexts = [(x['context'],x['member']) for x in inputs]
             for context in sorted(set(contexts), key=contexts.index):
                 item = row.to_dict()
                 value = 0
-                for input in [x for x in inputs if x['context']==context[0] and x['member']==context[1]]:
+                input_src = [x for x in inputs if x['context']==context[0] and x['member']==context[1]]
+                if len(input_src) < 2: continue
+                for input in input_src:
                     for k,v in [(k,v) for k,v in input.items() if k not in item]:
                         item[k] = v
                     add = int(input['value']) if input['value']!='NaN' else 0
@@ -318,13 +297,14 @@ class Reader(BaseReader):
                 results.append(item)
             return results
 
-        schemas = self.read_schema_by_role(role_link, use_cal_link)
+        schemas = self.read_schema_by_role(role_link, preserve_pre, preserve_cal)
         if len(schemas) == 0:
             return None
 
         xbrl_data = []
         for i, row in schemas.iterrows():
             tag_name = row['name']
+            row['name'] = ':'.join(tag_name.rsplit('_', 1))
             if tag_name not in self._value_dic:
                 xbrl_data += calc_value(row, xbrl_data)
                 continue
@@ -337,20 +317,18 @@ class Reader(BaseReader):
                 for k, v in value.to_dict().items():
                     if not k.endswith('label'):
                         item[k] = v
-                item['name'] = ':'.join(tag_name.rsplit('_', 1))
-
                 results.append(item)
             
             if len(results) > 0:
                 xbrl_data += results
 
-        xbrl_data = pd.DataFrame(xbrl_data)
+        xbrl_df = pd.DataFrame(xbrl_data)
         if self.debug_print:
             # pd.set_option('display.width', 1000)
             self.logger.info('\n'.join(list(set(self.debug_print))))
             # self.logger.info(xbrl_data[['name','value','depth', 'consolidated','label']])
             self.debug_print = []
-        return xbrl_data
+        return xbrl_df
 
     def find_value_names(self, candidates:List[str]) -> List[str]:
         values = []
@@ -367,9 +345,6 @@ class Node():
 
     def __init__(self, element, order=0):
         self.element = element
-        self.parent = None
-        # self.order = order
-        self.priority = ' '
         self.prohibited = None # (parent, order, priority)
         self.parents = []       # e: {'parent':Node, 'order': str, 'priority': str}
         self.children_count = 0
@@ -490,12 +465,6 @@ class Node():
 
     def update_derive_count(self, diff:int):
         self.derived_count += diff
-        # if self.derived_count == 0:
-        #     actives = [x for x in self.derives if x.get('use','')!='prohibited']
-        #     if len(actives) > 0:
-        #         assert len(actives) == 1
-        #         actives[0]['target'].update_derive_count(-1)
-        #         self.derives.remove(actives[0])
 
     def get_derive_chain(self):
         active_chains = [[x['target'], *x['target'].get_derive_chain()] for x
@@ -523,12 +492,12 @@ class Node():
         return '123456789abcdefghijklmnopqrstuvwxyz'[child_index] if child_index < 35 else '0'
 
     def get_derive_subpath(self):
-        if len(self.derives)==0 and self.element.data_type in ['monetary']:
+        if len(self.derives)==0 and self.element.data_type in ['monetary','perShare']:
             return [(Node.base_node.get_child_index(self),'1')]
         active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target'].get_derive_subpath()] for x
             in self.derives if x.get('use','')!='prohibited']
         sorted_chains = sorted(active_chains, key=len, reverse=True)
-        return sorted_chains[0] if len(sorted_chains) > 0 else []
+        return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self),'1')]
 
     @classmethod
     def init_derive_path(cls):
@@ -537,7 +506,7 @@ class Node():
 
     def get_derive_path(self):
         path = self.get_derive_subpath()
-        sign = any([x[1].startswith('-') for x in path])
-        sign_str = '-' if sign else '+'
+        sign = sum([x[1].startswith('-') for x in path])
+        sign_str = ('-' if sign%2==1 else '*') if sign>0 else '+'
         path_str = ''.join([x[0] for x in path])
         return sign_str + path_str if self.derived_count==0 else path_str
