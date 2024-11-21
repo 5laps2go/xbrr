@@ -24,8 +24,8 @@ class Finance(BaseParser):
         super().__init__(reader, ElementValue, tags)
 
     def bs(self, ifrs=False):
-        preserve_pre = {}
-        preserve_cal = {}
+        pre = {}
+        cal = {}
         role = self.__find_role_name('bs')
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
@@ -34,12 +34,13 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        bs = self.reader.read_value_by_role(role_uri, preserve_pre, preserve_cal)
+        bs = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
         return self.__filter_duplicate(bs)
 
     def pl(self, ifrs=False):
-        preserve_pre = {}
-        preserve_cal = {}
+        pre = {}
+        cal = {}
+        fix_cal = []
         role = self.__find_role_name('pl')
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
@@ -48,12 +49,12 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_pre, preserve_cal)
+        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
         return self.__filter_duplicate(pl)
 
     def cf(self, ifrs=False):
-        preserve_pre = {}
-        preserve_cal = {}
+        pre = {}
+        cal = {}
         role = self.__find_role_name('cf')
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
@@ -62,7 +63,7 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        cf = self.reader.read_value_by_role(role_uri, preserve_pre, preserve_cal)
+        cf = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
         return self.__filter_duplicate(cf)
 
     def __filter_duplicate(self, data):

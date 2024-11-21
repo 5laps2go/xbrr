@@ -21,6 +21,7 @@ class Finance(BaseParser):
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
             "_fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
             # "fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
+            "company_name": "jpdei_cor:FilerNameInJapaneseDEI",
 
             "report_FY": "tse-o-di:TypeOfReports-Annual",
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
@@ -37,6 +38,10 @@ class Finance(BaseParser):
 
     def get_security_code(self):
         return self.reader.xbrl_doc.company_code
+
+    def get_company_name(self):
+        value = self.get_value("company_name")
+        return value.value if value.value else 'not found'
 
     @property
     def fiscal_year_end_date(self):
@@ -112,6 +117,7 @@ class Finance(BaseParser):
         cal = {
             'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit'], # GrossOperatingProfit:2020-10-02 8184
             'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses'],
+            # 'GeneralAndAdministrativeExpensesSGA':  ['OperatingIncome','OperatingExpenses'],
             'OperatingIncome': ['OrdinaryIncome'],
             'NonOperatingIncome': ['OrdinaryIncome'],
             'NonOperatingExpenses': ['OrdinaryIncome'],
@@ -123,6 +129,8 @@ class Finance(BaseParser):
 
             'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
         }
+        fix_cal = ['OperatingGrossProfit', 'OperatingIncome', 'OrdinaryIncome']
+
         role = self.__find_role_name('pl', latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
@@ -132,7 +140,7 @@ class Finance(BaseParser):
         role = role[0] if not roleYTD else roleYTD[0]
         role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
+        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
         return pl if not latest_filter else self.__filter_accounting_items(pl)
 
     def cf(self, latest_filter=False):
@@ -162,6 +170,7 @@ class Finance(BaseParser):
         if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
             filtered = consolidated.query('~({})'.format(query), engine='python')
         # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
+        filtered = filtered.query('~dimension.str.startswith("OperatingSegmentsAxis")', engine='python')
         filtered.loc[filtered['member']!='','name']=filtered['member']
         filtered.loc[filtered['member']!='','depth']='+0'
         filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
@@ -185,6 +194,12 @@ class Finance(BaseParser):
             roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
         for name in role_candiates[finance_statement]:
             roles += [x for x in other_roles if name in x and x not in roles]
+        if self.reader.xbrl_doc.accounting_standard=='if':
+            rolesIFRS = [x for x in roles if x.endswith('IFRS')]
+            if rolesIFRS: return rolesIFRS
+        if self.reader.xbrl_doc.accounting_standard=='us':
+            rolesUS = [x for x in roles if x.endswith('US')]
+            if rolesUS: return rolesUS
         return roles
 
     def __read_value_by_textblock(self, candidates):
@@ -199,7 +214,7 @@ class Finance(BaseParser):
         def myen(vtext, unit):
             if vtext in ['－', '-', '―'] or len(vtext)==0:
                 return ''
-            myen = vtext.replace(',','').replace('△', '-') + unit
+            myen = vtext.translate(str.maketrans({',':None, '△':'-', '(': None, ')':None})) + unit
             return myen
         def isnum(myen):
             try:
@@ -219,7 +234,7 @@ class Finance(BaseParser):
                 for margin in range(0,len(columns)+prevcol):
                     label = ''.join([x.text.strip() for x in columns[margin].select('p')])
                     if label!='': break
-            return (label, margin)
+            return (label.replace(' ','').replace('\u3000',''), margin)
         def get_value(column):
             text = column.text.strip()
             tokens = re.split('[ \xa0\n]', text)
@@ -261,11 +276,13 @@ class Finance(BaseParser):
                 for record in thead.find_all('tr', recursive=False):
                     columns = list(record.find_all('td', recursive=False))
                     if len(values)==0:
-                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol, 'DUMMY', 'DUMMY')
+                        this_str = str(self.fiscal_year_end_date.year)
+                        prev_str = str(int(this_str)-1)
+                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
             tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
             for record in tbody.find_all('tr', recursive=False):
                 columns = list(record.find_all('td', recursive=False))
-                if len(columns) < 3: continue
+                if len(columns) < max(abs(thiscol), abs(prevcol))+1: continue
                 label, margin = label_margin(columns)
                 if len(values)==0: thiscol,prevcol = analyze_column(label, columns, thiscol, prevcol)
                 value = get_value(columns[thiscol])
@@ -287,7 +304,7 @@ class Finance(BaseParser):
                             'context': 'Prior1YTDDuration',
                             'data_type': 'monetary',
                             'name': "dummy",
-                            'depth': depth,
+                            'depth': str(depth),
                             'consolidated': True
                         })
                     values.append({
@@ -298,7 +315,7 @@ class Finance(BaseParser):
                         'context': 'CurrentYTDDuration',
                         'data_type': 'monetary',
                         'name': "dummy",
-                        'depth': depth,
+                        'depth': str(depth),
                         'consolidated': True
                     })
                 else:

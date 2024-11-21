@@ -28,21 +28,30 @@ class Reader(BaseReader):
         self.xbrl_doc = xbrl_doc
         self.taxonomy_repo = taxonomy_repo if taxonomy_repo is not None\
             else TaxonomyRepository(save_dir)
-
         self.save_dir = save_dir
-        self._role_dic = {}
-        self._context_dic, self._value_dic, self._namespace_dic =\
-            ElementValue.read_xbrl_values(self, xbrl_doc.xbrl)
 
-        self.schema_dic = self.taxonomy_repo.get_schema_dicts(self._namespace_dic)
-        self.schema_tree = SchemaTree(self, xbrl_doc.find_path('xsd'))
+        self.schema_tree = None
+        self._role_dic = {}
+        self._context_dic = {}
+        self._value_dic = {}
+        self._namespace_dic = {}
+        self.schema_dic = None
 
         self.logger = getLogger(__name__)
         self.debug_print = []
+    
+        self.setup_initial_environment(save_dir)
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy_repo, )
 
+    def setup_initial_environment(self, save_dir:str):
+        self._context_dic, self._value_dic, self._namespace_dic =\
+            ElementValue.read_xbrl_values(self, self.xbrl_doc.xbrl)
+
+        self.schema_dic = self.taxonomy_repo.load_schema_files(self._namespace_dic)
+        self.schema_tree = SchemaTree(self, self.xbrl_doc.find_path('xsd'))
+    
     @property
     def custom_roles(self):
         if len(self._role_dic) == 0:
@@ -100,7 +109,7 @@ class Reader(BaseReader):
         laburi = self.schema_tree.find_kind_uri('lab', xsduri)
         return laburi
 
-    def read_schema_by_role(self, role_name, preserve_pre:Dict, preserve_cal:Dict):
+    def read_schema_by_role(self, role_name, preserve_pre:Dict, preserve_cal:Dict, fix_cal_node:List):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
@@ -114,13 +123,12 @@ class Reader(BaseReader):
             self.logger.debug("-------------- Section calculation ------------------")
             for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
                 self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item", preserve_cal)
-            self.patch_calc_node_tree(nodes, role_name, "calc-patch.xml")
+            self.patch_calc_node_tree(nodes, fix_cal_node)
         return self.flatten_to_schemas(nodes)
     
-    def patch_calc_node_tree(self, nodes, role_name, patch):
-        self.make_node_tree(nodes, role_name, os.path.join(self.save_dir, patch), "calculationLink", "calculationArc", "summation-item", {})
-        self.fix_missing_calc_link(nodes)
+    def patch_calc_node_tree(self, nodes, fix_cal_node):
         self.eliminate_non_value_calc_leaf(nodes)
+        self.fix_missing_calc_link(nodes, fix_cal_node)
 
     def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role, preserve_dict):
         def t(name):
@@ -151,13 +159,6 @@ class Reader(BaseReader):
                 parent = locs[arc["xlink:from"]]
                 child = locs[arc["xlink:to"]]
 
-                # calc-patch
-                if parent["xlink:href"].startswith("calc-patch"):
-                    if (get_name(parent) not in nodes or get_name(child) not in nodes) or\
-                        nodes[get_name(child)].has_derive(nodes[get_name(parent)]):
-                        continue
-                    self.debug_print.append("calc-patch applied!!!")
-                
                 if get_name(child) not in nodes:
                     xsduri = get_absxsduri(docuri, child["xlink:href"])
                     c = ElementSchema.create_from_reference(self, xsduri)
@@ -171,13 +172,17 @@ class Reader(BaseReader):
                 # preserve presentation/calculation struct
                 if t(get_name(child)) in preserve_dict:
                     if t(get_name(parent)) in preserve_dict[t(get_name(child))]:
-                        self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                         if arctype=='presentationArc':
+                            self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                             nodes[get_name(child)].preserve_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
                         if arctype=='calculationArc':
+                            self.logger.debug("{}:{} --> {}:w{} p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                             nodes[get_name(child)].preserve_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
                     else:
                         self.debug_print.append("{} -> {}: o{} p{} {}".format(get_name(parent), get_name(child), arc.get('order','0'), arc.get('priority','0'),arc.get('use','')))
+                        if arctype=='calculationArc' and \
+                            any([t(x.name) in preserve_dict[t(get_name(child))] for x in nodes[get_name(child)].get_derive_chain()]):
+                            nodes[get_name(child)].preserve_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
                     continue
 
                 if arctype == "calculationArc":
@@ -187,30 +192,55 @@ class Reader(BaseReader):
                     self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                     nodes[get_name(child)].add_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
 
-    def fix_missing_calc_link(self, nodes):
-        def test_derived_node(target:Node, parent:Node, order:str) -> bool:
-            while target.parents:
-                p_dict = target.parents[0]
-                target = p_dict['parent']
-                if target==parent and int(p_dict['order']) < int(order):
-                    return True
-            return False
-        def missing_derived_orphans(fnode:Node, order:str):
-            parent = fnode.parents[0]['parent']
-            leafs = [k for (k,v) in nodes.items() if v.children_count==0 and len(v.derives)==0]
-            missings = [x for x in leafs if test_derived_node(nodes[x], parent, order)]
-            return missings
-        for missing in [k for (k,v) in nodes.items() if v.children_count==0 and v.derived_count==0]:
-            if missing.split('_')[-1] not in self.missing_calc_link:
+    def fix_missing_calc_link(self, nodes, fix_cal_node):
+        def prior_order(orphan:Node, missing:Node):
+            return orphan.presentation_order < missing.presentation_order
+        def missing_derived_orphans(fnode:Node):
+            def no_derive(node:Node):
+                return node.no_derive() and node.parent_name not in self._value_dic
+            leafs = [k for (k,v) in nodes.items() if v!=fnode and k in self._value_dic and no_derive(v)]
+            missings = [x for x in leafs if prior_order(nodes[x], fnode)]
+            return sorted(missings, reverse=True, key=lambda x: nodes[x].presentation_order)
+        def nearest_missing(fnode:Node):
+            for nearer in [v for v in nodes.values() if v.has_derive(fnode) and v.is_leaf and v.derived_count > 0]:
+                if missing_derived_orphans(nearer):
+                    nearest = nearest_missing(nearer)
+                    return nearer if nearest is None else nearest
+            return None
+        def validate_value(fnode:Node, onode:Node, w:int):
+            def epsvalue(node1:Node, node2:Node):
+                if (result := cvalue(node1))==0: result = cvalue(node2)
+                return (1000 if result%10*6 else 10**6 if result%10**9 else 10**9) * 2
+            def cvalue(node:Node):
+                ev = next(filter(lambda x: x.context_ref['id'].startswith('Current'), self._value_dic.get(node.name,[])), None)
+                return float(ev.value) if ev is not None and ev.value!='NaN' else 0
+            result = cvalue(fnode)
+            epsilon = epsvalue(fnode, onode)
+            value = sum([int(v.get_weight(fnode)) * cvalue(v) for v in nodes.values() if v.has_derive(fnode)])
+            onode_delta = value + w*cvalue(onode) - result
+            if result == 0 and abs(value - w*cvalue(onode)) < epsilon:  # replace nonstandard item to standard item (OperatingLoss to OperatingIncome)
+                if fnode.name not in self._value_dic:
+                    self._value_dic[fnode.name] = self._value_dic[onode.name]
+                return True
+            return abs(value - result) < epsilon or onode_delta > epsilon
+        for name in fix_cal_node:
+            missing = next(filter(lambda x: x.split('_')[-1]==name, nodes), None)
+            if missing is None or len(nodes[missing].parents)==0:
                 continue
-            for orphan in missing_derived_orphans(nodes[missing], nodes[missing].parents[0]['order']):
-                w = '-1' if 'Expense' in orphan else '1'
-                nodes[orphan].add_derive(nodes[missing], '', '0', '1', w)
-
-    missing_calc_link = {
-        'OperatingIncome': ['GrossProfit', 'SellingGeneralAndAdministrativeExpenses'],
-        'OrdinaryIncome': ['OperatingIncome'],
-    }
+            for orphan in missing_derived_orphans(nodes[missing]):
+                if (nearest:=nearest_missing(nodes[missing])) is not None and prior_order(nodes[orphan], nearest):
+                    w = 1
+                    if any([x in nearest.name for x in ['Expense','Cost']]): w = -w
+                    if any([x in orphan for x in ['Expense','Cost']]): w = -w
+                    if not validate_value(nearest, nodes[orphan], w):
+                        nodes[orphan].add_derive(nearest, '', '0', '1', str(w))
+                        continue
+                w = 1
+                if any([x in missing for x in ['Expense','Cost']]): w = -w
+                if any([x in orphan for x in ['Expense','Cost']]): w = -w
+                if validate_value(nodes[missing], nodes[orphan], w):
+                    continue
+                nodes[orphan].add_derive(nodes[missing], '', '0', '1', str(w))
 
     def eliminate_non_value_calc_leaf(self, nodes):
         # nodes preserves child, parent order (derived, derives order)
@@ -263,7 +293,7 @@ class Reader(BaseReader):
         return schemas
 
 
-    def read_value_by_role(self, role_link:str, preserve_pre:Dict = {}, preserve_cal:Dict = {}, scope:str = ""):
+    def read_value_by_role(self, role_link:str, preserve_pre:Dict = {}, preserve_cal:Dict = {}, fix_cal_node:List = [], scope:str = ""):
         """Read XBRL values in a dataframe which are specified by role and/or context.
 
         Arguments:
@@ -272,6 +302,7 @@ class Reader(BaseReader):
             scope {str} -- context name prefix, eg "Current" for "Current*" (default: {""} for everything)
             preserve_pre: presentation structure to avoid xbrl data errors
             preserve_cal: calculation structure to avoid xbrl data errors
+            fix_cal_node: nodes to fix missing calculation link
         Returns:
             xbrl_df -- Saved XbRL dataframe.
         """
@@ -297,7 +328,7 @@ class Reader(BaseReader):
                 results.append(item)
             return results
 
-        schemas = self.read_schema_by_role(role_link, preserve_pre, preserve_cal)
+        schemas = self.read_schema_by_role(role_link, preserve_pre, preserve_cal, fix_cal_node)
         if len(schemas) == 0:
             return None
 
@@ -315,7 +346,7 @@ class Reader(BaseReader):
                     continue
                 item = row.to_dict()
                 for k, v in value.to_dict().items():
-                    if not k.endswith('label'):
+                    if k not in ['name','label']:
                         item[k] = v
                 results.append(item)
             
@@ -335,6 +366,9 @@ class Reader(BaseReader):
         for name in candidates:
             values += [x for x in self._value_dic.keys() if name in x]
         return values
+    
+    def find_value_name(self, findop) -> str:
+        return next(filter(findop, self._value_dic.keys()), None)
 
     def findv(self, tag):
         id = tag.replace(':', '_')
@@ -348,8 +382,14 @@ class Node():
         self.prohibited = None # (parent, order, priority)
         self.parents = []       # e: {'parent':Node, 'order': str, 'priority': str}
         self.children_count = 0
-        self.derives = []       # e: {'target':Node, 'use':str, 'priority':str, 'weight':str}
+        self.derives = []       # e: {'target':Node, 'use':str, 'order':str, 'priority':str, 'weight':str}
         self.derived_count = 0
+
+    @property
+    def parent_name(self):
+        if not self.parents:
+            return None
+        return self.parents[0]['parent'].name
 
     @property
     def order(self):
@@ -408,15 +448,11 @@ class Node():
         return len(self.get_parents())
 
     @property
-    def path(self):
-        parents = list(reversed(self.get_parents()))
-        if len(parents) == 0:
-            return self.name
-        else:
-            path = str(self.order) + " " + self.name
-            for p in parents:
-                path = p.name + "/" + path
-            return path
+    def presentation_order(self):
+        parents = [float(x.order) for x in self.get_parents()]
+        parents.append(float(self.order))
+        parents.append(99.)     # short leaf has lower order of the longer leaf. (see flatten_to_schemas)
+        return tuple(parents)
 
     def get_parents(self):
         parents = []
@@ -449,13 +485,13 @@ class Node():
             target_derives = [x for x in self.derives if x['target']==p['target'] and x['use']!='prohibited']
             if len(target_derives) > 1:
                 for x in target_derives:
-                    if p['order']==x['order'] and p['priority']>x['priority']:
+                    if float(p['order'])==float(x['order']) and p['priority']>x['priority']:
                         self.derives.remove(p)
                         self.derives.remove(x)
                         p['target'].update_derive_count(-1)
 
             if target_derives and \
-                any([x['order']==p['order']and x['priority']>=p['priority'] for x in target_derives]):
+                any([float(x['order'])==float(p['order']) and x['priority']>=p['priority'] for x in target_derives]):
                 self.derives.remove(p)
     
     def remove_derive(self):
@@ -467,19 +503,30 @@ class Node():
         self.derived_count += diff
 
     def get_derive_chain(self):
-        active_chains = [[x['target'], *x['target'].get_derive_chain()] for x
-            in self.derives if x.get('use','')!='prohibited']
+        return self._get_derive_chain([])
+    def _get_derive_chain(self, path):
+        path.append(self)
+        active_chains = [[x['target'], *x['target']._get_derive_chain(path)] for x
+            in self.derives if x.get('use','')!='prohibited' and x['target'] not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
+        if len(sorted_chains) > 1: print("!!! get_derive_chain:",sorted_chains)
         return sorted_chains[0] if len(sorted_chains) > 0 else []
 
     def has_derive(self, target):
         derives = [x['target'] for x in self.derives if x['use']!='prohibited']
         if target in derives:
             return True
-        for derive in derives:
-            if derive.has_derive(target):
-                return True
         return False
+
+    def get_weight(self, target):
+        derives = [x['weight'] for x in self.derives if x['use']!='prohibited' and x['target']==target]
+        return derives[0] if len(derives)>0 else None
+
+    def no_derived(self):
+        return self.derived_count == 0
+    
+    def no_derive(self):
+        return not any([x['use']!='prohibited' for x in self.derives])
 
     children_list = {}
     base_node = None
@@ -492,10 +539,13 @@ class Node():
         return '123456789abcdefghijklmnopqrstuvwxyz'[child_index] if child_index < 35 else '0'
 
     def get_derive_subpath(self):
+        return self._get_derive_subpath([])
+    def _get_derive_subpath(self, path):
+        path.append(self)
         if len(self.derives)==0 and self.element.data_type in ['monetary','perShare']:
             return [(Node.base_node.get_child_index(self),'1')]
-        active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target'].get_derive_subpath()] for x
-            in self.derives if x.get('use','')!='prohibited']
+        active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target']._get_derive_subpath(path)] for x
+            in self.derives if x.get('use','')!='prohibited' and x['target'] not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
         return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self),'1')]
 

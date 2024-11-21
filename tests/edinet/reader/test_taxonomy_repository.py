@@ -17,7 +17,7 @@ class TestTaxonomyRepository(unittest.TestCase):
         if os.path.exists(cls.repository.taxonomies_root):
             shutil.rmtree(cls.repository.taxonomies_root)
 
-    def test_get_schema_dicts_tdnet(self):
+    def test_load_schema_files_tdnet(self):
         nsdecls = {
             'jppfs_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2020-11-01/jppfs_cor",
             'ixt':"http://www.xbrl.org/inlineXBRL/transformation/2011-07-31",
@@ -32,11 +32,11 @@ class TestTaxonomyRepository(unittest.TestCase):
             'iso4217':"http://www.xbrl.org/2003/iso4217",
             'jpcrp_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2020-11-01/jpcrp_cor"
         }
-        results = self.repository.get_schema_dicts(nsdecls)
+        results = self.repository.load_schema_files(nsdecls)
         self.assertEqual(1, len(results.schema_dicts))
         self.assertIn('2020-11-01', results.schema_dicts)
 
-    def tests_get_schema_dicts_edinet(self):
+    def tests_load_schema_files_edinet(self):
         nsdecls = {
             'link':"http://www.xbrl.org/2003/linkbase",
             'jpdei_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jpdei/2013-08-31/jpdei_cor",
@@ -49,7 +49,7 @@ class TestTaxonomyRepository(unittest.TestCase):
             'xbrli':"http://www.xbrl.org/2003/instance",
             'jppfs_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2018-03-31/jppfs_cor"
         }
-        results = self.repository.get_schema_dicts(nsdecls)
+        results = self.repository.load_schema_files(nsdecls)
         self.assertEqual(1, len(results.schema_dicts))
         self.assertIn('2018-03-31', results.schema_dicts)
 

@@ -23,8 +23,9 @@ class TaxonomyRepository():
             EdinetTaxonomy(self.taxonomies_root), TdnetTaxonomy(self.taxonomies_root),
         ]
         self.read_uri_taxonomy = lru_cache(maxsize=50)(self.__read_uri_taxonomy)
+        self.read_local_file = lru_cache(maxsize=10)(self.read_file)
 
-    def get_schema_dicts(self, nsdecls:dict[str, str]) -> SchemaDicts:
+    def load_schema_files(self, nsdecls:dict[str, str]) -> SchemaDicts:
         schema_dicts = SchemaDicts()
         for taxonomy in self.taxonomies:
             versions = [taxonomy.identify_version(nsdecl) for nsdecl in nsdecls.values() if taxonomy.family in nsdecl]
@@ -51,7 +52,7 @@ class TaxonomyRepository():
         "read xsd or xml specifed by uri"
         # assert os.path.isfile(uri) or uri.startswith('http:'), 'no xsduri found: {}'.format(uri)
         if not uri.startswith('http'):
-            return self.read_file(uri)
+            return self.read_local_file(uri)
         return self.read_uri_taxonomy(uri)
     
     def __read_uri_taxonomy(self, uri) -> BeautifulSoup:

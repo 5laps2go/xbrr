@@ -99,9 +99,9 @@ class ElementValue(BaseElementValue):
                         period = elem.find("xbrli:endDate").text
                         period_start = elem.find("xbrli:startDate").text
                         context_val = {'id': context_id, 'period': period, 'period_start': period_start}
-                    # if elem.find("xbrldi:explicitMember"):
-                    #     dimension = elem.find("xbrldi:explicitMember")["dimension"]
-                    #     context_val.update({'dimension':dimension})
+                    if elem.find("xbrldi:explicitMember"):
+                        dimension = elem.find("xbrldi:explicitMember")["dimension"]
+                        context_val.update({'dimension':dimension})
                     context_dic[context_id] = context_val
             elif elem.prefix == 'xbrldi':
                 pass
@@ -140,6 +140,7 @@ class ElementValue(BaseElementValue):
             "consolidated": "NonConsolidated" not in context_id,
             "context": id_parts[0],
             "member": member,
+            "dimension": self.context_ref.get('dimension','').split(':')[-1],
             "period": self.context_ref['period'],
             "period_start": self.context_ref['period_start'] if 'period_start' in self.context_ref else None,
             "label": self.label,
@@ -174,3 +175,6 @@ class ElementValue(BaseElementValue):
         #   LegalCapitalSurplusMember CapitalStockMember RetainedEarningsMember CapitalSurplusMember
         #   PreviousMember_ForecastMember   前回発表予想
         #   CurrentMember_ForecastMember    今回修正予想
+        # dimension:
+        #   jpcrp_cor:OperatingSegmentsAxis      セグメント
+        #   jpigp_cor:ComponentsOfEquityIFRSAxis EquityIFRS詳細

@@ -37,11 +37,6 @@ class Forecast(BaseParser):
 
             "forecast_correction_flag": "tse-ed-t:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
-
-            "sales": "tse-ed-t:Sales",
-            "sales_IFRS": "tse-ed-t:SalesIFRS",
-            "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
-            "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
         tse_t_ed_tags = {
             "document_name": "tse-t-ed:DocumentName",
@@ -57,11 +52,6 @@ class Forecast(BaseParser):
             "forecast_correction_flag": "tse-t-ed:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-t-ed:CorrectionOfDividendForecastInThisQuarter",
 
-            "sales": "tse-t-ed:Sales",
-            "sales_IFRS": "tse-t-ed:SalesIFRS",
-            "netsales_IFRS": "tse-t-ed:NetSalesIFRS",
-            "profit_IFRS": "tse-t-ed:ProfitIFRS",
-
             "ForecastDividendPerShare": "tse-t-ed:ForecastDividendPerShareAnnual",
             "ForecastUpperDividendPerShare":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
             "ForecastLowerDividendPerShare":"tse-t-ed:ForecastLowerDividendPerShareAnnual",
@@ -73,11 +63,6 @@ class Forecast(BaseParser):
 
             "filling_date": "tse-re-t:FilingDate",
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
-
-            "sales_REIT": "tse-re-t:OperatingRevenuesREIT",
-            "sales_IFRS": "tse-ed-t:SalesIFRS",
-            "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
-            "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
@@ -123,9 +108,13 @@ class Forecast(BaseParser):
         return value.value if value.value else 'not found'
 
     @property
-    def use_IFRS(self):
-        return (self.profit_IFRS.value is not None) or \
-            (self.netsales_IFRS.value is not None) or (self.sales_IFRS.value is not None)
+    def accounting_standard(self):
+        std = 'jp'
+        if self.reader.find_value_name(lambda x: x.endswith('IFRS')):
+            std = 'if'
+        elif self.reader.find_value_name(lambda x: x.endswith('US')):
+            std = 'us'
+        return std
     
     @property
     def reporting_date(self):
