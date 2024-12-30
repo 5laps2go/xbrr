@@ -127,6 +127,7 @@ class Reader(BaseReader):
         return self.flatten_to_schemas(nodes)
     
     def patch_calc_node_tree(self, nodes, fix_cal_node):
+        self.fix_calc_link_for_parent_subtotal(nodes)
         self.eliminate_non_value_calc_leaf(nodes)
         self.fix_missing_calc_link(nodes, fix_cal_node)
 
@@ -179,9 +180,9 @@ class Reader(BaseReader):
                             self.logger.debug("{}:{} --> {}:w{} p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
                             nodes[get_name(child)].preserve_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
                     else:
-                        self.debug_print.append("{} -> {}: o{} p{} {}".format(get_name(parent), get_name(child), arc.get('order','0'), arc.get('priority','0'),arc.get('use','')))
+                        self.logger.debug("{} -> {}: o{} p{} {}".format(get_name(parent), get_name(child), arc.get('order','0'), arc.get('priority','0'),arc.get('use','')))
                         if arctype=='calculationArc' and \
-                            any([t(x.name) in preserve_dict[t(get_name(child))] for x in nodes[get_name(child)].get_derive_chain()]):
+                            (nodes[get_name(parent)].no_derive() or any([t(x.name) in preserve_dict[t(get_name(child))] for x in nodes[get_name(parent)].get_derive_chain()])):
                             nodes[get_name(child)].preserve_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
                     continue
 
@@ -196,9 +197,7 @@ class Reader(BaseReader):
         def prior_order(orphan:Node, missing:Node):
             return orphan.presentation_order < missing.presentation_order
         def missing_derived_orphans(fnode:Node):
-            def no_derive(node:Node):
-                return node.no_derive() and node.parent_name not in self._value_dic
-            leafs = [k for (k,v) in nodes.items() if v!=fnode and k in self._value_dic and no_derive(v)]
+            leafs = [k for (k,v) in nodes.items() if v!=fnode and k in self._value_dic and v.no_derive()]
             missings = [x for x in leafs if prior_order(nodes[x], fnode)]
             return sorted(missings, reverse=True, key=lambda x: nodes[x].presentation_order)
         def nearest_missing(fnode:Node):
@@ -207,16 +206,18 @@ class Reader(BaseReader):
                     nearest = nearest_missing(nearer)
                     return nearer if nearest is None else nearest
             return None
+        def validate_calc(fnode:Node):
+            return validate_value(fnode, fnode, 0)
         def validate_value(fnode:Node, onode:Node, w:int):
             def epsvalue(node1:Node, node2:Node):
                 if (result := cvalue(node1))==0: result = cvalue(node2)
                 return (1000 if result%10*6 else 10**6 if result%10**9 else 10**9) * 2
             def cvalue(node:Node):
-                ev = next(filter(lambda x: x.context_ref['id'].startswith('Current'), self._value_dic.get(node.name,[])), None)
+                ev = next(filter(lambda x: not x.context_ref['id'].startswith('Prior'), self._value_dic.get(node.name,[])), None)
                 return float(ev.value) if ev is not None and ev.value!='NaN' else 0
             result = cvalue(fnode)
             epsilon = epsvalue(fnode, onode)
-            value = sum([int(v.get_weight(fnode)) * cvalue(v) for v in nodes.values() if v.has_derive(fnode)])
+            value = sum([float(v.get_weight(fnode)) * cvalue(v) for v in nodes.values() if v.has_derive(fnode)])
             onode_delta = value + w*cvalue(onode) - result
             if result == 0 and abs(value - w*cvalue(onode)) < epsilon:  # replace nonstandard item to standard item (OperatingLoss to OperatingIncome)
                 if fnode.name not in self._value_dic:
@@ -233,7 +234,9 @@ class Reader(BaseReader):
                     if any([x in nearest.name for x in ['Expense','Cost']]): w = -w
                     if any([x in orphan for x in ['Expense','Cost']]): w = -w
                     if not validate_value(nearest, nodes[orphan], w):
-                        nodes[orphan].add_derive(nearest, '', '0', '1', str(w))
+                        if not validate_calc(nodes[missing]):
+                            # print('######{} {} nearest {} <== {}'.format(validate_calc(nodes[missing]), nearest.name, missing, orphan))
+                            nodes[orphan].add_derive(nearest, '', '0', '1', str(w))
                         continue
                 w = 1
                 if any([x in missing for x in ['Expense','Cost']]): w = -w
@@ -242,12 +245,44 @@ class Reader(BaseReader):
                     continue
                 nodes[orphan].add_derive(nodes[missing], '', '0', '1', str(w))
 
+    def fix_calc_link_for_parent_subtotal(self, nodes):
+        parent_subtotal = {}
+        context = None
+        for name in nodes:
+            n = nodes[name]
+            if name in self._value_dic and n.parent_name in self._value_dic:
+                children = parent_subtotal.get(n.parent_name, [])
+                parent_subtotal[n.parent_name] = children + [n]
+                if not context:
+                    contexts = [x.context_ref['id'] for x in self._value_dic[name] if not x.context_ref['id'].startswith('Prior')]
+                    if contexts:
+                        context = contexts[0]
+
+        for parent_name,children in parent_subtotal.items():
+            # children make subtotal
+            if nodes[parent_name].validate_subtotal(children, context, self._value_dic):
+                for child in [x for x in children if x.no_derive()]:
+                    child.add_derive(nodes[parent_name], '', '0', '1', str(1))
+                continue
+            # derive children can not make subtotal (内訳であるためSUBTOTALと一致しない)
+            derived = [x for x in children if not x.no_derive()]
+            if not nodes[parent_name].validate_subtotal(derived, context, self._value_dic):
+                for child in derived:
+                    child.remove_derive()
+
     def eliminate_non_value_calc_leaf(self, nodes):
+        def no_current_value(name):
+            return all([x.context.startswith('Prior') or x.value=='NaN' for x in self._value_dic[name]])
+        def current_nan(name):
+            return all([x.value=='NaN' for x in self._value_dic[name] if not x.context.startswith('Prior')])
         # nodes preserves child, parent order (derived, derives order)
         for name in nodes:
             n = nodes[name]
-            if n.derived_count==0 and name not in self._value_dic:
+            while n is not None and n.derived_count==0 and len(n.derives)> 0 \
+                 and (n.name not in self._value_dic or no_current_value(n.name)):
+                derive = n.get_derive()
                 n.remove_derive()
+                n = derive
 
     def flatten_to_schemas(self, nodes):
         schemas = []
@@ -499,13 +534,17 @@ class Node():
             x['target'].update_derive_count(-1)
         self.derives = []
 
+    def get_derive(self):
+        derives =  [x for x in self.derives if x['use']!='prohibited']
+        return derives[0]['target'] if derives else None
+
     def update_derive_count(self, diff:int):
         self.derived_count += diff
 
     def get_derive_chain(self):
         return self._get_derive_chain([])
-    def _get_derive_chain(self, path):
-        path.append(self)
+    def _get_derive_chain(self, path0):
+        path = path0 + [self]
         active_chains = [[x['target'], *x['target']._get_derive_chain(path)] for x
             in self.derives if x.get('use','')!='prohibited' and x['target'] not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
@@ -527,6 +566,17 @@ class Node():
     
     def no_derive(self):
         return not any([x['use']!='prohibited' for x in self.derives])
+    
+    def validate_subtotal(self, children, context, value_dic):
+        def epsvalue(v1, v2, count):
+            result = v1 if v1!=0 else v2
+            return (1000 if result%10*6 else 10**6 if result%10**9 else 10**9) * count
+        def cvalue(node:Node, context):
+            ev = next(filter(lambda x: x.context_ref['id']==context, value_dic.get(node.name,[])), None)
+            return float(ev.value) if ev is not None and ev.value!='NaN' else 0
+        result = cvalue(self, context)
+        value = sum([cvalue(v, context) for v in children])
+        return abs(value - result) < epsvalue(result, value, len(children))
 
     children_list = {}
     base_node = None
@@ -540,8 +590,8 @@ class Node():
 
     def get_derive_subpath(self):
         return self._get_derive_subpath([])
-    def _get_derive_subpath(self, path):
-        path.append(self)
+    def _get_derive_subpath(self, path0):
+        path = path0 + [self]
         if len(self.derives)==0 and self.element.data_type in ['monetary','perShare']:
             return [(Node.base_node.get_child_index(self),'1')]
         active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target']._get_derive_subpath(path)] for x
