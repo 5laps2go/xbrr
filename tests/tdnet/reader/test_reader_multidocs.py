@@ -29,14 +29,14 @@ class TestReader(unittest.TestCase):
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
         reader = Reader(xbrl_doc, self.taxonomy_repo, save_dir=self._dir)
 
-        bs = reader.read_schema_by_role("rol_QuarterlyConsolidatedBalanceSheet").reset_index()
+        bs = reader.read_schema_by_role("rol_QuarterlyConsolidatedBalanceSheet",{},{},[]).reset_index()
         xsd_dic1 = self.taxonomy_repo.taxonomy_repo
 
         root_dir = os.path.join(self._dir, "E24982")
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
         reader = Reader(xbrl_doc, self.taxonomy_repo, save_dir=self._dir)
 
-        bs = reader.read_schema_by_role("rol_BalanceSheet").reset_index()
+        bs = reader.read_schema_by_role("rol_BalanceSheet",{},{},[]).reset_index()
         xsd_dic2 = self.taxonomy_repo.taxonomy_repo
 
         self.assertDictEqual(xsd_dic1, xsd_dic2)

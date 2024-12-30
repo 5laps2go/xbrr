@@ -1,3 +1,7 @@
+import logging
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())
+
 import xbrr.edinet as _edinet
 import xbrr.tdnet as _tdnet
 

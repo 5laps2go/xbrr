@@ -2,6 +2,7 @@ import collections
 import importlib
 import re
 import warnings
+from logging import getLogger
 
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
@@ -19,7 +20,8 @@ class Finance(BaseParser):
             "real_estate_for_lease": "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock",
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
             "_fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
-            "fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
+            # "fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
+            "company_name": "jpdei_cor:FilerNameInJapaneseDEI",
 
             "report_FY": "tse-o-di:TypeOfReports-Annual",
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
@@ -34,9 +36,20 @@ class Finance(BaseParser):
 
         super().__init__(reader, ElementValue, tags)
 
+    def get_security_code(self):
+        return self.reader.xbrl_doc.company_code
+
+    def get_company_name(self):
+        value = self.get_value("company_name")
+        return value.value if value.value else 'not found'
+
     @property
-    def use_IFRS(self):
-        return self.accounting_standards.value == 'IFRS'
+    def fiscal_year_end_date(self):
+        return self.reader.xbrl_doc.fiscal_year_date
+
+    @property
+    def reporting_iso_date(self):
+        return self.reader.xbrl_doc.published_date[0].date().isoformat()
 
     @property
     def fiscal_period_kind(self):
@@ -52,64 +65,94 @@ class Finance(BaseParser):
 
     @property
     def consolidated(self):
-        # old style of xbrl
-        def count(flag):
-            fscount = 0
-            for fstype in ['BS', 'PL', 'CF', 'PLYTD']:
-                for term in ['', 'Quarterly', 'Interim']:
-                    v = self.reader.findv(flag.format(term, fstype)) 
-                    if v and v.value=='true':
-                        fscount = fscount + 1
-            return fscount
-        cons_count = count("jpfr-di:Consolidated{0}{1}Consolidated{0}FinancialStatements")
-        noncons_count = count("jpfr-di:Nonconsolidated{0}{1}Nonconsolidated{0}FinancialStatements")
-        if cons_count == noncons_count and cons_count > 0:
-            return self.reader.xbrl_doc.consolidated
-        
-        if cons_count > noncons_count:
-            return True
-        if noncons_count > cons_count:
-            return False
-        # new style of xbrl
-        if self.whether_consolidated.value=='true':
-            return True
-        return False
+        return self.reader.xbrl_doc.consolidated
 
-    def bs(self, latest_filter=False, use_cal_link=True):
+    def bs(self, latest_filter=False):
+        pre = {
+            'AssetsAbstract': ['BalanceSheetsAbstract','BalanceSheetLineItems'],
+                'CurrentAssetsAbstract': ['AssetsAbstract'],
+                'CurrentAssets': ['CurrentAssetsAbstract','AssetsAbstract'],
+                'NoncurrentAssetsAbstract': ['AssetsAbstract'],
+                'NoncurrentAssets': ['NoncurrentAssetsAbstract','AssetsAbstract'],
+                'Assets':  ['AssetsAbstract'],
+            'LiabilitiesAbstract': ['BalanceSheetsAbstract','BalanceSheetLineItems','LiabilitiesAndNetAssetsAbstractELE'],
+                'CurrentLiabilitiesAbstract': ['LiabilitiesAbstract'],
+                'CurrentLiabilities': ['CurrentLiabilitiesAbstract','LiabilitiesAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
+                'NoncurrentLiabilitiesAbstract': ['LiabilitiesAbstract'],
+                'NoncurrentLiabilities': ['NoncurrentLiabilitiesAbstract','LiabilitiesAbstract','LiabilitiesAndNetAssetsAbstractELE'],
+                'ReservesUnderTheSpecialLawsAbstract1': ['LiabilitiesAbstract'],
+                'ReservesUnderTheSpecialLawsAbstract2': ['LiabilitiesAbstract'],
+                'Liabilities': ['LiabilitiesAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
+            'NetAssetsAbstract':  ['BalanceSheetsAbstract','BalanceSheetLineItems','LiabilitiesAndNetAssetsAbstractELE'],
+                'MinorityInterests': ['_NetAssetsAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
+                'NetAssets': ['NetAssetsAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
+        }
+        cal = {
+            'CurrentLiabilities': ['Liabilities'],
+            'NoncurrentLiabilities': ['Liabilities'],
+            'Liabilities': ['LiabilitiesAndNetAssets'],
+        }
         role = self.__find_role_name('bs', latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1,'consolidated':True}])
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        bs = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        bs = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
         return bs if not latest_filter else self.__filter_accounting_items(bs)
 
-    def pl(self, latest_filter=False, use_cal_link=True):
+    def pl(self, latest_filter=False):
+        pre = {
+            'OperatingIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'NonOperatingIncomeAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'NonOperatingExpensesAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'OrdinaryIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'ExtraordinaryIncomeAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'ExtraordinaryLossAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'IncomeBeforeIncomeTaxes': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'NetIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+        }
+        cal = {
+            'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit'], # GrossOperatingProfit:2020-10-02 8184
+            'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses'],
+            # 'GeneralAndAdministrativeExpensesSGA':  ['OperatingIncome','OperatingExpenses'],
+            'OperatingIncome': ['OrdinaryIncome'],
+            'NonOperatingIncome': ['OrdinaryIncome'],
+            'NonOperatingExpenses': ['OrdinaryIncome'],
+            'OrdinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
+            'ExtraordinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
+            'ExtraordinaryLoss': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
+            'IncomeBeforeIncomeTaxes': ['IncomeBeforeMinorityInterests','ProfitLoss'],
+            'IncomeBeforeMinorityInterests': ['NetIncome'],
+
+            'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
+        }
+        fix_cal = ['OperatingGrossProfit', 'OperatingIncome', 'OrdinaryIncome']
+
         role = self.__find_role_name('pl', latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1, 'consolidated': True}])
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
         roleYTD = [x for x in role if x.endswith('YTD')]
         role = role[0] if not roleYTD else roleYTD[0]
         role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
         return pl if not latest_filter else self.__filter_accounting_items(pl)
 
-    def cf(self, latest_filter=False, use_cal_link=True):
+    def cf(self, latest_filter=False):
         role = self.__find_role_name('cf',latest_filter)
         if len(role) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1, 'consolidated':True}])
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        cf = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        cf = self.reader.read_value_by_role(role_uri)
         return cf if not latest_filter else self.__filter_accounting_items(cf)
 
     def __filter_out_str(self):
@@ -120,16 +163,16 @@ class Finance(BaseParser):
     def __filter_accounting_items(self, data):
         if data is None:
             return data
-        query_str = '~context.str.contains("{0}")&~member.str.contains("{0}")'.format(self.__filter_out_str())
+        query_str = 'consolidated=={}'.format(self.consolidated)
         consolidated = data.query(query_str, engine='python')
-        if self.consolidated and consolidated.shape[0]<=data.shape[0]/10:  # non-consolidated bs/pl/cf provided even in the consolidated report
-            consolidated = data
-        # eliminate non related context 'Quarter Duration'
         query = '~context.str.contains("Quarter")|~context.str.contains("Duration")'
         filtered = consolidated.query(query, engine='python')
         if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
             filtered = consolidated.query('~({})'.format(query), engine='python')
-        # Exclude dimension member because NetAssets with variety of member attributes
+        # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
+        filtered = filtered.query('~dimension.str.startswith("OperatingSegmentsAxis")', engine='python')
+        filtered.loc[filtered['member']!='','name']=filtered['member']
+        filtered.loc[filtered['member']!='','depth']='+0'
         filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
         return filtered
 
@@ -151,6 +194,12 @@ class Finance(BaseParser):
             roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
         for name in role_candiates[finance_statement]:
             roles += [x for x in other_roles if name in x and x not in roles]
+        if self.reader.xbrl_doc.accounting_standard=='if':
+            rolesIFRS = [x for x in roles if x.endswith('IFRS')]
+            if rolesIFRS: return rolesIFRS
+        if self.reader.xbrl_doc.accounting_standard=='us':
+            rolesUS = [x for x in roles if x.endswith('US')]
+            if rolesUS: return rolesUS
         return roles
 
     def __read_value_by_textblock(self, candidates):
@@ -165,7 +214,7 @@ class Finance(BaseParser):
         def myen(vtext, unit):
             if vtext in ['－', '-', '―'] or len(vtext)==0:
                 return ''
-            myen = vtext.replace(',','').replace('△', '-') + unit
+            myen = vtext.translate(str.maketrans({',':None, '△':'-', '(': None, ')':None})) + unit
             return myen
         def isnum(myen):
             try:
@@ -185,7 +234,7 @@ class Finance(BaseParser):
                 for margin in range(0,len(columns)+prevcol):
                     label = ''.join([x.text.strip() for x in columns[margin].select('p')])
                     if label!='': break
-            return (label, margin)
+            return (label.replace(' ','').replace('\u3000',''), margin)
         def get_value(column):
             text = column.text.strip()
             tokens = re.split('[ \xa0\n]', text)
@@ -227,11 +276,13 @@ class Finance(BaseParser):
                 for record in thead.find_all('tr', recursive=False):
                     columns = list(record.find_all('td', recursive=False))
                     if len(values)==0:
-                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol)
+                        this_str = str(self.fiscal_year_end_date.year)
+                        prev_str = str(int(this_str)-1)
+                        thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
             tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
             for record in tbody.find_all('tr', recursive=False):
                 columns = list(record.find_all('td', recursive=False))
-                if len(columns) < 3: continue
+                if len(columns) < max(abs(thiscol), abs(prevcol))+1: continue
                 label, margin = label_margin(columns)
                 if len(values)==0: thiscol,prevcol = analyze_column(label, columns, thiscol, prevcol)
                 value = get_value(columns[thiscol])
@@ -253,7 +304,7 @@ class Finance(BaseParser):
                             'context': 'Prior1YTDDuration',
                             'data_type': 'monetary',
                             'name': "dummy",
-                            'depth': depth,
+                            'depth': str(depth),
                             'consolidated': True
                         })
                     values.append({
@@ -264,7 +315,7 @@ class Finance(BaseParser):
                         'context': 'CurrentYTDDuration',
                         'data_type': 'monetary',
                         'name': "dummy",
-                        'depth': depth,
+                        'depth': str(depth),
                         'consolidated': True
                     })
                 else:
@@ -277,7 +328,8 @@ class Finance(BaseParser):
                         unit = ''
                     # if value.startswith('当'): #'当連結会計年度' in value
                     if len(values)==0:
-                        this_str = self.fiscal_year_end_date.value[0:4]
+                        this_str = str(self.fiscal_year_end_date.year)
                         prev_str = str(int(this_str)-1)
                         thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
-        return pd.DataFrame(values).drop_duplicates(subset=['label', 'context'], keep='first')
+        headers = ['label','value','unit','indent','context','data_type','name','depth','consolidated']
+        return pd.DataFrame(values, columns=headers).drop_duplicates(subset=['label', 'context'], keep='first')

@@ -37,11 +37,6 @@ class Forecast(BaseParser):
 
             "forecast_correction_flag": "tse-ed-t:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
-
-            "sales": "tse-ed-t:Sales",
-            "sales_IFRS": "tse-ed-t:SalesIFRS",
-            "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
-            "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
         tse_t_ed_tags = {
             "document_name": "tse-t-ed:DocumentName",
@@ -57,11 +52,6 @@ class Forecast(BaseParser):
             "forecast_correction_flag": "tse-t-ed:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-t-ed:CorrectionOfDividendForecastInThisQuarter",
 
-            "sales": "tse-t-ed:Sales",
-            "sales_IFRS": "tse-t-ed:SalesIFRS",
-            "netsales_IFRS": "tse-t-ed:NetSalesIFRS",
-            "profit_IFRS": "tse-t-ed:ProfitIFRS",
-
             "ForecastDividendPerShare": "tse-t-ed:ForecastDividendPerShareAnnual",
             "ForecastUpperDividendPerShare":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
             "ForecastLowerDividendPerShare":"tse-t-ed:ForecastLowerDividendPerShareAnnual",
@@ -73,11 +63,6 @@ class Forecast(BaseParser):
 
             "filling_date": "tse-re-t:FilingDate",
             "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
-
-            "sales_REIT": "tse-re-t:OperatingRevenuesREIT",
-            "sales_IFRS": "tse-ed-t:SalesIFRS",
-            "netsales_IFRS": "tse-ed-t:NetSalesIFRS",
-            "profit_IFRS": "tse-ed-t:ProfitIFRS"
         }
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
@@ -123,9 +108,13 @@ class Forecast(BaseParser):
         return value.value if value.value else 'not found'
 
     @property
-    def use_IFRS(self):
-        return (self.profit_IFRS.value is not None) or \
-            (self.netsales_IFRS.value is not None) or (self.sales_IFRS.value is not None)
+    def accounting_standard(self):
+        std = 'jp'
+        if self.reader.find_value_name(lambda x: x.endswith('IFRS')):
+            std = 'if'
+        elif self.reader.find_value_name(lambda x: x.endswith('US')):
+            std = 'us'
+        return std
     
     @property
     def reporting_date(self):
@@ -179,7 +168,7 @@ class Forecast(BaseParser):
         if len(role) <= 0: return ''
         return 'Q2'
 
-    def fc(self,  latest_filter=False, use_cal_link=True):
+    def fc(self,  latest_filter=False):
         # year forecast:  'ForecastMemger','(Upper|Lower)Member' in member and 'CurrentYearDuration' = context
         # q2   forecast:  'ForecastMember','(Upper|Lower)Member' in member and 'CurrentAccumulatedQ2Duration' = context
         role = self.__find_role_name('fc')
@@ -187,7 +176,7 @@ class Forecast(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        fc = self.reader.read_value_by_role(role_uri, use_cal_link=False)
+        fc = self.reader.read_value_by_role(role_uri)
         if self.namespace_prefix=='tse-t-ed':
             pre_ver = self.reader.schema_tree.presentation_version()
             if pre_ver in ['2012-03-31', '2012-06-30']:
@@ -199,13 +188,13 @@ class Forecast(BaseParser):
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
         return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=True)
 
-    def fc_dividends(self, latest_filter=False, use_cal_link=True):
+    def fc_dividends(self, latest_filter=False):
         role = self.__find_role_name('fc_dividends')
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        fc = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        fc = self.reader.read_value_by_role(role_uri)
         return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
     
     def dividend_per_share(self, latest_filter=False) -> float:
@@ -224,18 +213,18 @@ class Forecast(BaseParser):
         fc_df = self.fc_dividends(latest_filter)
         if fc_df is None or fc_df.empty:
             return np.nan
-        query_forecast_figures = 'value!=""&member.str.contains("ForecastMember")&not member.str.startswith("Annual")'
+        query_forecast_figures = 'value!="NaN"&member.str.contains("Forecast")&not member.str.startswith("Annual")'
         fc_df = fc_df.query(query_forecast_figures, engine='python')
         money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
         return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
 
-    def q2ytd(self, latest_filter=False, use_cal_link=True):
+    def q2ytd(self, latest_filter=False):
         role = self.__find_role_name('fc_q2ytd', latest_filter)
         if len(role) <= 0: return None
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        q2ytd = self.reader.read_value_by_role(role_uri, use_cal_link=use_cal_link)
+        q2ytd = self.reader.read_value_by_role(role_uri)
         return q2ytd if q2ytd is None or not latest_filter else self.__filter_accounting_items(q2ytd)
 
     def __filter_out_str(self):
@@ -254,12 +243,12 @@ class Forecast(BaseParser):
             data = data[~data['consolidated']]
 
         # eliminate PreviousMember and filter YearDuration
-        current_year_query = '~member.str.contains("PreviousMember")&context.str.contains("Year.*Duration")'
+        current_year_query = '~member.str.contains("Previous")&context.str.contains("Year.*Duration")'
         filtered = data.query(current_year_query, engine='python')
         # filter forecat members only
-        forecast_query = 'value!=""'
+        forecast_query = 'value!="NaN"'
         if filtered[filtered['member']!=''].shape[0] > 0:
-            forecast_query += '&(member.str.contains("ForecastMember")|member.str.contains("LowerMember")|member.str.contains("UpperMember"))'
+            forecast_query += '&(member.str.contains("Forecast")|member.str.contains("Lower")|member.str.contains("Upper"))'
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
 

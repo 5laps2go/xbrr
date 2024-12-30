@@ -67,6 +67,9 @@ class ElementValue(BaseElementValue):
         if "contextRef" in xml_el.attrs:
             context_id = xml_el["contextRef"]
             context_ref = context_dic[context_id]
+        
+        if xml_el.get("xsi:nil",'')=='true':
+            value = 'NaN'
 
         instance = cls(
             name=name, reference=reference,
@@ -96,6 +99,9 @@ class ElementValue(BaseElementValue):
                         period = elem.find("xbrli:endDate").text
                         period_start = elem.find("xbrli:startDate").text
                         context_val = {'id': context_id, 'period': period, 'period_start': period_start}
+                    if elem.find("xbrldi:explicitMember"):
+                        dimension = elem.find("xbrldi:explicitMember")["dimension"]
+                        context_val.update({'dimension':dimension})
                     context_dic[context_id] = context_val
             elif elem.prefix == 'xbrldi':
                 pass
@@ -121,6 +127,9 @@ class ElementValue(BaseElementValue):
     def to_dict(self):
         context_id = self.context_ref['id']
         id_parts = context_id.split("_", 1)
+        member = ''
+        if len(id_parts) > 1:
+            member = "_".join([x.replace("Member","") for x in id_parts[1].split("_") if x!="NonConsolidatedMember"])
 
         return {
             "name": self.name,
@@ -130,7 +139,8 @@ class ElementValue(BaseElementValue):
             "decimals": self.decimals,
             "consolidated": "NonConsolidated" not in context_id,
             "context": id_parts[0],
-            "member": id_parts[1] if len(id_parts) > 1 else '',
+            "member": member,
+            "dimension": self.context_ref.get('dimension','').split(':')[-1],
             "period": self.context_ref['period'],
             "period_start": self.context_ref['period_start'] if 'period_start' in self.context_ref else None,
             "label": self.label,
@@ -165,3 +175,6 @@ class ElementValue(BaseElementValue):
         #   LegalCapitalSurplusMember CapitalStockMember RetainedEarningsMember CapitalSurplusMember
         #   PreviousMember_ForecastMember   前回発表予想
         #   CurrentMember_ForecastMember    今回修正予想
+        # dimension:
+        #   jpcrp_cor:OperatingSegmentsAxis      セグメント
+        #   jpigp_cor:ComponentsOfEquityIFRSAxis EquityIFRS詳細

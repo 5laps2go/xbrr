@@ -70,6 +70,18 @@ class Doc(XbrlDoc):
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
     @property
+    def fiscal_year_date(self) -> datetime:
+        if 'PublicDoc' in self.file_spec:
+            # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
+            #  split by '_'           0         1           2      3     4
+            #  split by '-'   0      1   2               
+            v1 = os.path.basename(self.file_spec).split('_')
+            date = datetime.strptime(v1[2], "%Y-%m-%d")
+            return date
+        else:
+            raise LookupError("Fiscal year date is not encoded")
+
+    @property
     def company_code(self) -> str:
         if 'PublicDoc' in self.file_spec:
             # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
@@ -87,3 +99,19 @@ class Doc(XbrlDoc):
     @property
     def consolidated(self) -> bool:
         raise FileNotFoundError("Not implemented because of no information for consolidated identification")
+
+    @property
+    def accounting_standard(self) -> str:
+        if 'PublicDoc' in self.file_spec:
+            # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
+            #  split by '_'           0         1           2      3     4
+            v1 = os.path.basename(self.file_spec).split('_')
+            return v1[0][0:2]
+        elif 'AuditDoc' in self.file_spec:
+            # AuditDoc/jpaud-aar-cn-001_E00883-000_2020-12-31_01_2021-03-26
+            # split by '_'       0
+            v1 = os.path.basename(self.file_spec).split('_')
+            return v1[0][0:2]
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+    

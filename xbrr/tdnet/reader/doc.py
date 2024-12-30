@@ -21,7 +21,7 @@ class Doc(XbrlDoc):
             return []
         def _xbrl_file(root_dir, kind):
             patn_dict = {'public': ['**/tse-??????fr-*.xsd', '**/tdnet-??????fr-*.xsd'],
-                         'summary': ['**/tse-??????sm-*.xsd','**/tse-rv??-*.xsd','**/tdnet-??????sm-*.xsd']}
+                         'summary': ['**/tse-??????s[my]-*.xsd','**/tse-rv??-*.xsd','**/tdnet-??????sm-*.xsd']}
             xsd_files = _glob_list(patn_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
@@ -113,6 +113,23 @@ class Doc(XbrlDoc):
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
     @property
+    def fiscal_year_date(self) -> datetime:
+        if 'public' == self.xbrl_kind:
+            # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
+            #             0  1          2     3   4  5  6   7   8  9
+            v = os.path.basename(self.file_spec).split('-')
+            date = datetime.strptime("%s-%s-%s" % (v[3], v[4], v[5]), "%Y-%m-%d")
+            return date
+        # elif 'summary' == self.xbrl_kind:
+        #     # Summary/tse-acedjpsm-36450-20210714336450
+        #     #          0      1       2         3 
+        #     v = os.path.basename(self.file_spec).split('-')
+        #     date = datetime.strptime(v[3][0:8], "%Y%m%d")
+        #     return date
+        else:
+            raise LookupError("Fiscal year date is not encoded")
+
+    @property
     def company_code(self) -> str:
         if 'public' == self.xbrl_kind:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
@@ -140,9 +157,26 @@ class Doc(XbrlDoc):
             # Summary/tse-acedjpsm-36450-20210714336450
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
-            if 'rvfc' in v[1]:  # ./tse-rvfc-36450-20210714336450 for correction document
+            if v[1] in ['rrfc','rvfc','rvdf']:  # rrfc	配当金修正, rvfc	業績予想修正, rvdf	配当予想のお知らせ
                 return True
             return test_consolidated(v[1][1])
+        else:
+            raise FileNotFoundError("No Attachment or Summary folder found.")
+
+    @property
+    def accounting_standard(self) -> str:
+        if 'public' == self.xbrl_kind:
+            # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
+            #             0  1          2     3   4  5  6   7   8  9
+            v = os.path.basename(self.file_spec).split('-')
+            return v[1][4:6] if len(v[1])==8 else ''
+        elif 'summary' == self.xbrl_kind:
+            # Summary/tse-acedjpsm-36450-20210714336450
+            #          0      1       2         3 
+            v = os.path.basename(self.file_spec).split('-')
+            if v[1] in ['rrfc','rvfc','rvdf']:  # rrfc	配当金修正, rvfc	業績予想修正, rvdf	配当予想のお知らせ
+                return ''
+            return v[1][4:6] if len(v[1])==8 else ''
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
 

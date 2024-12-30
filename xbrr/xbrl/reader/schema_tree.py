@@ -27,25 +27,22 @@ class SchemaTree():
         def get_absxsduri(docuri, xsduri):
             if xsduri.startswith('http'): return xsduri
             return urljoin(docuri, xsduri)
-        def read_linkbaseRefs(xsd_xml, xsduri):
-            href_list = []
-            for ref in xsd_xml.find_all('link:linkbaseRef'):
+        self.namespace_linkbaseRef[xsd_ns] = []
+
+        xsd_xml = self.reader.read_uri(xsduri)
+        for ref in xsd_xml.find_all(['import','link:linkbaseRef']):
+            if ref.name=='import':
+                ref_ns = ref['namespace']
+                ref_xsduri = urljoin(xsduri, ref['schemaLocation'])
+                self.namespace_uri[ref_ns] = ref_xsduri
+                self.read_import_tree(ref_ns, ref_xsduri)
+            else: # link:linkbaseRef
                 # ex.: <link:linkbaseRef xlink:type="simple" xlink:href="jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26_pre.xml" xlink:role="http://www.xbrl.org/2003/role/presentationLinkbaseRef" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" />
                 linkrole_uri = ref.get('xlink:role')
                 linkrole = linkrole_uri.split('/')[-1] if linkrole_uri is not None else ''
-                href_list.append((get_absxsduri(xsduri, ref['xlink:href']), linkrole))
-            return href_list
-
-        xsd_xml = self.reader.read_uri(xsduri)
-        linkbaseRefs = read_linkbaseRefs(xsd_xml, xsduri)
-        self.namespace_linkbaseRef[xsd_ns] = linkbaseRefs
-        self.linkbaseRefs.extend(linkbaseRefs)
-
-        for ref in xsd_xml.find_all('import'):
-            ref_ns = ref['namespace']
-            ref_xsduri = ref['schemaLocation']
-            self.namespace_uri[ref_ns] = urljoin(xsduri, ref_xsduri)
-            self.read_import_tree(ref_ns, ref_xsduri)
+                linkbaseRef = (get_absxsduri(xsduri, ref['xlink:href']), linkrole)
+                self.namespace_linkbaseRef[xsd_ns].append(linkbaseRef)
+                self.linkbaseRefs.append(linkbaseRef)
 
     def find_kind_uri(self, kind:str, xsduri="") -> str:
         kind2linkbase = {'lab':'labelLinkbaseRef', 'cal':'calculationLinkbaseRef', 
@@ -81,6 +78,7 @@ class SchemaTree():
                     continue
                 return pair[0]
 
+        return 'no_linkbase_ref.xml'
         raise ImportError('linkbaseRefs Error:{} for {}'.format(doc_base, linkbase_type))
 
     def presentation_version(self) -> str:
