@@ -130,6 +130,7 @@ class Reader(BaseReader):
         self.fix_calc_link_for_parent_subtotal(nodes)
         self.eliminate_non_value_calc_leaf(nodes)
         self.fix_missing_calc_link(nodes, fix_cal_node)
+        self.eliminate_extra_subtotal(nodes)
 
     def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role, preserve_dict):
         def t(name):
@@ -223,7 +224,7 @@ class Reader(BaseReader):
                 if fnode.name not in self._value_dic:
                     self._value_dic[fnode.name] = self._value_dic[onode.name]
                 return True
-            return abs(value - result) < epsilon or onode_delta > epsilon
+            return abs(value - result) > epsilon and onode_delta < epsilon if w!=0 else abs(value - result) < epsilon
         for name in fix_cal_node:
             missing = next(filter(lambda x: x.split('_')[-1]==name, nodes), None)
             if missing is None or len(nodes[missing].parents)==0:
@@ -231,10 +232,10 @@ class Reader(BaseReader):
             for orphan in missing_derived_orphans(nodes[missing]):
                 if (nearest:=nearest_missing(nodes[missing])) is not None and prior_order(nodes[orphan], nearest):
                     w = 1
-                    if any([x in nearest.name for x in ['Expense','Cost']]): w = -w
-                    if any([x in orphan for x in ['Expense','Cost']]): w = -w
-                    if not validate_value(nearest, nodes[orphan], w):
-                        if not validate_calc(nodes[missing]):
+                    if any([x in nearest.name for x in ['Expense','Cost','SGA']]): w = -w
+                    if any([x in orphan for x in ['Expense','Cost','SGA']]): w = -w
+                    if validate_value(nearest, nodes[orphan], w):
+                        if validate_calc(nodes[missing]):
                             # print('######{} {} nearest {} <== {}'.format(validate_calc(nodes[missing]), nearest.name, missing, orphan))
                             nodes[orphan].add_derive(nearest, '', '0', '1', str(w))
                         continue
@@ -242,8 +243,7 @@ class Reader(BaseReader):
                 if any([x in missing for x in ['Expense','Cost']]): w = -w
                 if any([x in orphan for x in ['Expense','Cost']]): w = -w
                 if validate_value(nodes[missing], nodes[orphan], w):
-                    continue
-                nodes[orphan].add_derive(nodes[missing], '', '0', '1', str(w))
+                    nodes[orphan].add_derive(nodes[missing], '', '0', '1', str(w))
 
     def fix_calc_link_for_parent_subtotal(self, nodes):
         parent_subtotal = {}
@@ -268,7 +268,7 @@ class Reader(BaseReader):
             derived = [x for x in children if not x.no_derive()]
             if not nodes[parent_name].validate_subtotal(derived, context, self._value_dic):
                 for child in derived:
-                    child.remove_derive()
+                    child.remove_derive(nodes[parent_name])
 
     def eliminate_non_value_calc_leaf(self, nodes):
         def no_current_value(name):
@@ -281,8 +281,39 @@ class Reader(BaseReader):
             while n is not None and n.derived_count==0 and len(n.derives)> 0 \
                  and (n.name not in self._value_dic or no_current_value(n.name)):
                 derive = n.get_derive()
-                n.remove_derive()
+                n.remove_derive_all()
                 n = derive
+    
+    def eliminate_extra_subtotal(self, nodes):
+        def epsvalue(node:Node):
+            result = cvalue(node)
+            return (1000 if result%10*6 else 10**6 if result%10**9 else 10**9) * 2
+        def cvalue(node:Node):
+            ev = next(filter(lambda x: not x.context_ref['id'].startswith('Prior'), self._value_dic.get(node.name,[])), None)
+            return float(ev.value) if ev is not None and ev.value!='NaN' else 0
+        def calc_error(node:Node):
+            result = cvalue(node)
+            values = [(k,float(v.get_weight(node)) * cvalue(v)) for k,v in nodes.items() if v.has_derive(node)]
+            return (sum([v for k,v in values]) - result, values)
+
+        for oinode in [v for k,v in nodes.items() if k.endswith('OperatingIncome')]:
+            epsilon = epsvalue(oinode)
+            diff, values = calc_error(oinode)
+            if abs(diff) > epsilon:
+                self.logger.info("# extra item found in OperatingIncome")
+                for k,v in values:
+                    # if abs(v-diff) < epsilon and nodes[k].no_derived():
+                    if abs(v-diff) < epsilon:
+                        self.logger.info("# extra item is {}".format(k))
+                        found = False
+                        # for k2,v2 in [(k2,v2) for k2,v2 in values if k2!=k]:
+                        #     diff2, values2 = calc_error(nodes[k2])
+                        #     if values2 and abs(diff + diff2) < epsilon:
+                        #         nodes[k].push_derive(nodes[k2])
+                        #         found = True
+                        #         break
+                        if not found:
+                            nodes[k].remove_derive(oinode)
 
     def flatten_to_schemas(self, nodes):
         schemas = []
@@ -515,24 +546,38 @@ class Node():
     def preserve_derive(self, target, use:str, priority:str, order:str, weight:str):
         self.derives.append({'target':target, 'use':use, 'priority':priority, 'order':order, 'weight':weight})
         target.update_derive_count(+1 if use!='prohibited' else 0)
-        prohibited_derives = [x for x in self.derives if x['target']==target and x['use']=='prohibited']
-        for p in prohibited_derives:
-            target_derives = [x for x in self.derives if x['target']==p['target'] and x['use']!='prohibited']
-            if len(target_derives) > 1:
+        if len(self.derives) > 2:
+            prohibited_derives = [x for x in self.derives if x['use']=='prohibited']
+            for p in prohibited_derives:
+                target_derives = [x for x in self.derives if x['target']==p['target'] and x['use']!='prohibited']
                 for x in target_derives:
                     if float(p['order'])==float(x['order']) and p['priority']>x['priority']:
                         self.derives.remove(p)
                         self.derives.remove(x)
                         p['target'].update_derive_count(-1)
 
-            if target_derives and \
-                any([float(x['order'])==float(p['order']) and x['priority']>=p['priority'] for x in target_derives]):
-                self.derives.remove(p)
+                if target_derives and \
+                    any([float(x['order'])==float(p['order']) and x['priority']>=p['priority'] for x in target_derives]):
+                    self.derives.remove(p)
     
-    def remove_derive(self):
+    def remove_derive_all(self):
         for x in [x for x in self.derives if x['use']!='prohibited']:
             x['target'].update_derive_count(-1)
         self.derives = []
+    
+    def remove_derive(self, target):
+        derives = [x for x in self.derives if x['target']!=target]
+        if len(derives)!=len(self.derives):
+            target.update_derive_count(-1)
+            self.derives = derives
+    
+    def push_derive(self, new_target):
+        for x in [x for x in self.derives if x['use']!='prohibited']:
+            x['target'].update_derive_count(-1)
+            if float(self.get_weight(x['target'])) == -1 and float(new_target.get_weight(x['target'])) == -1:
+                x['weight'] = x['weight'].replace('-','')
+            x['target'] = new_target
+            x['target'].update_derive_count(1)
 
     def get_derive(self):
         derives =  [x for x in self.derives if x['use']!='prohibited']
