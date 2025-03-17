@@ -84,7 +84,7 @@ class Forecast(BaseParser):
             self.consolidated = '連結' == m.group(6)
             self.fiscal_period_kind = gen_fiscal_period_kind(m) # don't know which forecast contained
             self.accounting_standards = m.group(4)
-        elif ('業績予想' in title or '配当予想' in title):
+        elif ('業績予想' in title or '配当予想' in title or '配当の予想' in title):
             m = re.search(r'(第(.)四半期|中間)', title)
             if m is not None:   # 9691: 2024年３月期第２四半期連結累計期間業績予想の修正に関するお知らせ
                 self.fiscal_period_kind = gen_fiscal_period_kind(m)

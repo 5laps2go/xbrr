@@ -111,12 +111,14 @@ class Finance(BaseParser):
             'OrdinaryIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
             'ExtraordinaryIncomeAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
             'ExtraordinaryLossAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'IncomeBeforeIncomeTaxes': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
+            'IncomeBeforeIncomeTaxes': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems','IncomeBeforeMinorityInterests'],
             'NetIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
         }
         cal = {
-            'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit'], # GrossOperatingProfit:2020-10-02 8184
-            'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses'],
+            'NetSales': ['GrossProfit','OperatingIncome','GrossProfitNetGP'],
+            'CostOfSales': ['GrossProfit','OperatingIncome'],
+            'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit','OrdinaryIncome'], # GrossOperatingProfit:2020-10-02 8184, OrdinaryIncome:2023-02-14 6561
+            'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses','OrdinaryIncome'], # OrdinaryIncome:2023-02-14 6561
             # 'GeneralAndAdministrativeExpensesSGA':  ['OperatingIncome','OperatingExpenses'],
             'OperatingIncome': ['OrdinaryIncome'],
             'NonOperatingIncome': ['OrdinaryIncome'],
@@ -124,12 +126,12 @@ class Finance(BaseParser):
             'OrdinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
             'ExtraordinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
             'ExtraordinaryLoss': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
-            'IncomeBeforeIncomeTaxes': ['IncomeBeforeMinorityInterests','ProfitLoss'],
+            'IncomeBeforeIncomeTaxes': ['IncomeBeforeMinorityInterests','ProfitLoss', 'NetIncome'],
             'IncomeBeforeMinorityInterests': ['NetIncome'],
 
             'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
         }
-        fix_cal = ['OperatingGrossProfit', 'OperatingIncome', 'OrdinaryIncome']
+        fix_cal = ['GrossProfit','GrossProfitIFRS', 'OperatingGrossProfit', 'OperatingIncome', 'OperatingProfitLossIFRS', 'OrdinaryIncome']
 
         role = self.__find_role_name('pl', latest_filter)
         if len(role) == 0:
@@ -169,6 +171,7 @@ class Finance(BaseParser):
         filtered = consolidated.query(query, engine='python')
         if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
             filtered = consolidated.query('~({})'.format(query), engine='python')
+        filtered['depth'] = self.reader.shrink_depth(filtered['depth'], data['depth'])
         # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
         filtered = filtered.query('~dimension.str.startswith("OperatingSegmentsAxis")', engine='python')
         filtered.loc[filtered['member']!='','name']=filtered['member']
