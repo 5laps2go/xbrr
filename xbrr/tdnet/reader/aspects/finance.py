@@ -131,7 +131,7 @@ class Finance(BaseParser):
 
             'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
         }
-        fix_cal = ['GrossProfit','GrossProfitIFRS', 'OperatingGrossProfit', 'OperatingIncome', 'OperatingProfitLossIFRS', 'OrdinaryIncome']
+        fix_cal = ['GrossProfit','~^GrossProfit.{,8}$','OperatingGrossProfit','OrdinaryIncomeBNK','OperatingIncome','OperatingProfitLossIFRS','OrdinaryIncome','BusinessProfitPLIFRS','<OperatingIncome','>OrdinaryProfitLoss','NormalizedOperatingProfitIFRS', '~[Ll]oss$', '~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
 
         role = self.__find_role_name('pl', latest_filter)
         if len(role) == 0:
