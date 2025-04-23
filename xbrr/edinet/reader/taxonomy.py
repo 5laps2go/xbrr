@@ -31,6 +31,7 @@ class Taxonomy(BaseTaxonomy):
         "2021-11-01": "https://www.fsa.go.jp/search/20211109/1c_Taxonomy.zip",
         "2022-11-01": "https://www.fsa.go.jp/search/20221108/1c_Taxonomy.zip",
         "2023-12-01": "https://www.fsa.go.jp/search/20231211/1c_Taxonomy.zip",
+        "2024-11-01": "https://www.fsa.go.jp/search/20241112/1c_Taxonomy.zip",
     }
 
     def __init__(self, taxonomy_root: str):
