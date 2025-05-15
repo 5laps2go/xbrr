@@ -92,12 +92,12 @@ class Finance(BaseParser):
             'NoncurrentLiabilities': ['Liabilities'],
             'Liabilities': ['LiabilitiesAndNetAssets'],
         }
-        role = self.__find_role_name('bs', latest_filter)
-        if len(role) == 0:
+        roles = self.__find_role_name('bs', latest_filter)
+        if len(roles) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        role = role[0]
+        role = roles[0]
         role_uri = self.reader.get_role(role).uri
 
         bs = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
@@ -115,8 +115,8 @@ class Finance(BaseParser):
             'NetIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
         }
         cal = {
-            'NetSales': ['GrossProfit','OperatingIncome','GrossProfitNetGP'],
-            'CostOfSales': ['GrossProfit','OperatingIncome'],
+            'NetSales': ['GrossProfit','OperatingIncome','GrossProfitNetGP','GrossOperatingRevenue'],
+            'CostOfSales': ['GrossProfit','OperatingIncome','OperatingGrossProfit'],
             'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit','OrdinaryIncome'], # GrossOperatingProfit:2020-10-02 8184, OrdinaryIncome:2023-02-14 6561
             'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses','OrdinaryIncome'], # OrdinaryIncome:2023-02-14 6561
             # 'GeneralAndAdministrativeExpensesSGA':  ['OperatingIncome','OperatingExpenses'],
@@ -131,27 +131,30 @@ class Finance(BaseParser):
 
             'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
         }
-        fix_cal = ['GrossProfit','~^GrossProfit.{,8}$','OperatingGrossProfit','OrdinaryIncomeBNK','OperatingIncome','OperatingProfitLossIFRS','OrdinaryIncome','BusinessProfitPLIFRS','<OperatingIncome','>OrdinaryProfitLoss','NormalizedOperatingProfitIFRS', '~[Ll]oss$', '~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
+        fix_cal = ['GrossProfit','GrossProfitNetGP','OperatingGrossProfit',  # '~^GrossProfit.{,5}$', 1848:2011-05-11 fail, 
+                   'OperatingIncome', 'OperatingProfitLossIFRS','<OperatingIncome','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
+                   'OrdinaryIncome','OrdinaryIncomeBNK','>OrdinaryProfitLoss','~(Operating|Ordinary)[Ll]oss$',
+                   'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
 
-        role = self.__find_role_name('pl', latest_filter)
-        if len(role) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
+        roles = self.__find_role_name('pl', latest_filter)
+        if len(roles) == 0:
+            textblock = self.__read_value_by_textblock(["StatementOfIncome"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        roleYTD = [x for x in role if x.endswith('YTD')]
-        role = role[0] if not roleYTD else roleYTD[0]
+        roleYTD = [x for x in roles if x.endswith('YTD')]
+        role = roles[0] if not roleYTD else roleYTD[0]
         role_uri = self.reader.get_role(role).uri
 
         pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
         return pl if not latest_filter else self.__filter_accounting_items(pl)
 
     def cf(self, latest_filter=False):
-        role = self.__find_role_name('cf',latest_filter)
-        if len(role) == 0:
+        roles = self.__find_role_name('cf',latest_filter)
+        if len(roles) == 0:
             textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        role = role[0]
+        role = roles[0]
         role_uri = self.reader.get_role(role).uri
 
         cf = self.reader.read_value_by_role(role_uri)
@@ -186,17 +189,30 @@ class Finance(BaseParser):
             filter_out_str = self.__filter_out_str()
             filtered_roles = [x for x in roles if not re.search(filter_out_str, x) and 'Notes' not in x]
             return [x for x in filtered_roles if 'Consolidated' in x],[x for x in filtered_roles if 'Consolidated' not in x]
-        role_candiates = {
+        def role_candidate_order(role, candidates):
+            for i, candidate in enumerate(candidates):
+                if candidate in role:
+                    for j, period in enumerate(role_periods):
+                        if period in role:
+                            return j*7 + i
+                    return len(role_periods)*7 + i
+            return 999
+        role_candidates = {
             'bs': ["StatementOfFinancialPosition", "BalanceSheet"],
-            'pl': ["StatementOfIncome", "StatementsOfIncome", "StatementOfProfitOrLoss", "Income"], # ComprehensiveIncome should be lowest priority
+            'pl': ["StatementOfIncome", "StatementsOfIncome", "StatementOfProfitOrLoss", "(?<!Comprehensive)Income"], # ComprehensiveIncome should be lowest priority
             'cf': ["StatementOfCashFlows", "CashFlow"],
         }
+        role_periods = ['QuarterEnd', 'SemiAnnual', 'QuarterPeriod', 'Quarterly']
         cons_or_noncons_roles, other_roles = consolidate_type_filter(list(self.reader.custom_roles.keys()))
-        roles = []
-        for name in role_candiates[finance_statement]:
-            roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
-        for name in role_candiates[finance_statement]:
-            roles += [x for x in other_roles if name in x and x not in roles]
+        # roles = []
+        roles = sorted(filter(lambda x: role_candidate_order(x, role_candidates[finance_statement])<900, cons_or_noncons_roles+other_roles),
+                       key=lambda x: role_candidate_order(x, role_candidates[finance_statement]))
+        # for name in role_candiates[finance_statement]:
+        #     roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
+        # if not roles: roles += [x for x in cons_or_noncons_roles if alt_role_candiates[finance_statement] in x and x not in roles]
+        # for name in role_candiates[finance_statement]:
+        #     roles += [x for x in other_roles if name in x and x not in roles]
+        # if not roles: roles += [x for x in other_roles if alt_role_candiates[finance_statement] in x and x not in roles]
         if self.reader.xbrl_doc.accounting_standard=='if':
             rolesIFRS = [x for x in roles if x.endswith('IFRS')]
             if rolesIFRS: return rolesIFRS
