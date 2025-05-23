@@ -220,11 +220,11 @@ class Doc(XbrlDoc):
                 copy.append(clone(child))
             return copy        
         def xlate_to_xbrl(element, xbrl_xml, separator, outbs):
+            scale_hist = {}
             def __new_ixvalue(name, prefix, attrs, value):
                 xbrli = outbs.new_tag(name, namespace=nsdecls['xmlns:'+prefix], nsprefix=prefix, **attrs)
-                if 'xsi:nil' not in attrs:
-                    xbrli.string = value
-                    xbrl_xml.append(xbrli)
+                xbrli.string = value
+                xbrl_xml.append(xbrli)
             def __replace_nonXXX_on_src(element):
                 # replace ix:nonXXX to its string on ixbrl tree
                 if not element.contents:
@@ -251,14 +251,19 @@ class Doc(XbrlDoc):
                             __new_ixvalue(name, prefix, attrs, value)
                             __replace_nonXXX_on_src(elem)
                             continue
-                        elif elem.name in ['nonFraction']:
+                        elif elem.name in ['nonFraction', 'nonfraction']:
                             prefix,name = tuple(elem["name"].split(':'))
                             value = elem.text
                             attrs = {k:v for k,v in elem.attrs.items() 
                                     if k in ['contextRef','decimals','unitRef','xsi:nil']}
-                            if "scale" in elem.attrs and elem.attrs.get("format",'')=='ixt:numdotdecimal':
+                            if "scale" in elem.attrs and elem.attrs.get("format",'ixt:numdotdecimal')=='ixt:numdotdecimal': # no format case:3276:2014-02-10
                                 scale = int(elem.attrs["scale"])
                                 decimals = int(elem.attrs["decimals"])
+                                if elem.get('unitRef') in ['JPY','USD']:
+                                    scale_hist[scale] = scale_hist.get(scale,0) + 1
+                                    if len(scale_hist) > 1: # scale bug 6578:2019-07-11
+                                        scale = max(scale_hist, key=scale_hist.get)
+                                        decimals = -scale
                                 try:
                                     # temporary fix for bad ix format
                                     if value=='':
