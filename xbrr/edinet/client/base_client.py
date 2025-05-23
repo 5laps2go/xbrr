@@ -1,11 +1,13 @@
+from pit import Pit
+
 class BaseClient():
     """"Base API Client.
 
     Manage the URL and version for the all client.
     """
-    BASE_URL = "https://disclosure.edinet-fsa.go.jp/api/{}/{}"
+    BASE_URL = "https://api.edinet-fsa.go.jp/api/{}/{}"
 
-    def __init__(self, target: str, version: str = "v1"):
+    def __init__(self, target: str, version: str = "v2"):
         """
         Arguments:
             target -- API destination (set by subclass).
@@ -15,6 +17,10 @@ class BaseClient():
         """
         self.version = version
         self.target = target
+        pitdata = Pit.get('editnet_apikey', {
+            'require': {'edinet_apikey': 'edinet apikey'}
+        })
+        self.apikey = pitdata['edinet_apikey']
 
     @property
     def endpoint(self):
