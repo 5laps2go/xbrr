@@ -36,7 +36,8 @@ class DocumentClient(BaseClient):
         """
         url = self.endpoint.format(document_id)
         params = {
-            "type": response_type
+            "type": response_type,
+            "Subscription-Key": self.apikey
         }
 
         r = requests.get(url, params=params, stream=True)

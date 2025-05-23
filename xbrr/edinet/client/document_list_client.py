@@ -42,7 +42,8 @@ class BaseDocumentListClient(BaseClient):
 
         params = {
             "date": _date,
-            "type": self.response_type
+            "type": self.response_type,
+            "Subscription-Key": self.apikey
         }
 
         r = requests.get(url, params=params)

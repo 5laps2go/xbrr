@@ -18,19 +18,19 @@ class TestAPI(unittest.TestCase):
 
     @delay
     def test_api_metadata(self):
-        metadata = xbrr.edinet.api.metadata.get("2019-01-31")
+        metadata = xbrr.edinet.api.metadata.get("2025-01-31")
         self.assertGreater(metadata.count, 0)
 
     @delay
     def test_api_document(self):
         _dir = os.path.dirname(__file__)
-        path = xbrr.edinet.api.document.get_pdf("S100FGR9", save_dir=_dir)
+        path = xbrr.edinet.api.document.get_pdf("S100VH69", save_dir=_dir)
         self.assertTrue(os.path.exists(path))
         os.remove(path)
 
     @delay
     def test_api_documents(self):
-        documents = xbrr.edinet.api.documents.get("2023-03-09")
+        documents = xbrr.edinet.api.documents.get("2025-01-31")
         self.assertEqual(documents.metadata.count, len(documents.list))
 
         _dir = os.path.dirname(__file__)
