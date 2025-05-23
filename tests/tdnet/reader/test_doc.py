@@ -32,8 +32,8 @@ class TestDoc(unittest.TestCase):
         xbrl = bs.find('xbrli:xbrl')
         self.assertEqual(len(xbrl.attrs), 12)
         self.assertEqual(len(list(xbrl.find_all('context'))), 37)
-        # self.assertEqual(len(xbrl.contents), 221)
-        self.assertEqual(len(xbrl.contents), 153) # when xsi:nil element is skipped
+        self.assertEqual(len(xbrl.contents), 221)
+        # self.assertEqual(len(xbrl.contents), 153) # when xsi:nil element is skipped
 
     def test_read_manifest_ixbrl(self):
         doc = Doc(root_dir=self.ixbrl_dir, xbrl_kind="public")
@@ -43,5 +43,5 @@ class TestDoc(unittest.TestCase):
         self.assertEqual(len(xbrl.attrs), 9)
         self.assertEqual(len(list(xbrl.find_all('context'))), 5)
         self.assertEqual(len(list(xbrl.find_all('unit'))), 2)
-        # self.assertEqual(len(xbrl.contents), 187)
-        self.assertEqual(len(xbrl.contents), 169) # when xsi:nil element is skipped
+        self.assertEqual(len(xbrl.contents), 187)
+        # self.assertEqual(len(xbrl.contents), 169) # when xsi:nil element is skipped

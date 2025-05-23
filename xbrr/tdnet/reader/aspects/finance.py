@@ -68,25 +68,6 @@ class Finance(BaseParser):
         return self.reader.xbrl_doc.consolidated
 
     def bs(self, latest_filter=False):
-        pre = {
-            'AssetsAbstract': ['BalanceSheetsAbstract','BalanceSheetLineItems'],
-                'CurrentAssetsAbstract': ['AssetsAbstract'],
-                'CurrentAssets': ['CurrentAssetsAbstract','AssetsAbstract'],
-                'NoncurrentAssetsAbstract': ['AssetsAbstract'],
-                'NoncurrentAssets': ['NoncurrentAssetsAbstract','AssetsAbstract'],
-                'Assets':  ['AssetsAbstract'],
-            'LiabilitiesAbstract': ['BalanceSheetsAbstract','BalanceSheetLineItems','LiabilitiesAndNetAssetsAbstractELE'],
-                'CurrentLiabilitiesAbstract': ['LiabilitiesAbstract'],
-                'CurrentLiabilities': ['CurrentLiabilitiesAbstract','LiabilitiesAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
-                'NoncurrentLiabilitiesAbstract': ['LiabilitiesAbstract'],
-                'NoncurrentLiabilities': ['NoncurrentLiabilitiesAbstract','LiabilitiesAbstract','LiabilitiesAndNetAssetsAbstractELE'],
-                'ReservesUnderTheSpecialLawsAbstract1': ['LiabilitiesAbstract'],
-                'ReservesUnderTheSpecialLawsAbstract2': ['LiabilitiesAbstract'],
-                'Liabilities': ['LiabilitiesAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
-            'NetAssetsAbstract':  ['BalanceSheetsAbstract','BalanceSheetLineItems','LiabilitiesAndNetAssetsAbstractELE'],
-                'MinorityInterests': ['_NetAssetsAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
-                'NetAssets': ['NetAssetsAbstract', 'LiabilitiesAndNetAssetsAbstractELE'],
-        }
         cal = {
             'CurrentLiabilities': ['Liabilities'],
             'NoncurrentLiabilities': ['Liabilities'],
@@ -100,20 +81,10 @@ class Finance(BaseParser):
         role = roles[0]
         role_uri = self.reader.get_role(role).uri
 
-        bs = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
+        bs = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
         return bs if not latest_filter else self.__filter_accounting_items(bs)
 
     def pl(self, latest_filter=False):
-        pre = {
-            'OperatingIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'NonOperatingIncomeAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'NonOperatingExpensesAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'OrdinaryIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'ExtraordinaryIncomeAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'ExtraordinaryLossAbstract': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-            'IncomeBeforeIncomeTaxes': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems','IncomeBeforeMinorityInterests'],
-            'NetIncome': ['StatementsOfIncomeAbstract','StatementOfIncomeLineItems'],
-        }
         cal = {
             'NetSales': ['GrossProfit','OperatingIncome','GrossProfitNetGP','GrossOperatingRevenue'],
             'CostOfSales': ['GrossProfit','OperatingIncome','OperatingGrossProfit'],
@@ -145,7 +116,7 @@ class Finance(BaseParser):
         role = roles[0] if not roleYTD else roleYTD[0]
         role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
+        pl = self.reader.read_value_by_role(role_uri, preserve_cal=cal, fix_cal_node=fix_cal)
         return pl if not latest_filter else self.__filter_accounting_items(pl)
 
     def cf(self, latest_filter=False):
@@ -204,15 +175,8 @@ class Finance(BaseParser):
         }
         role_periods = ['QuarterEnd', 'SemiAnnual', 'QuarterPeriod', 'Quarterly']
         cons_or_noncons_roles, other_roles = consolidate_type_filter(list(self.reader.custom_roles.keys()))
-        # roles = []
         roles = sorted(filter(lambda x: role_candidate_order(x, role_candidates[finance_statement])<900, cons_or_noncons_roles+other_roles),
                        key=lambda x: role_candidate_order(x, role_candidates[finance_statement]))
-        # for name in role_candiates[finance_statement]:
-        #     roles += [x for x in cons_or_noncons_roles if name in x and x not in roles]
-        # if not roles: roles += [x for x in cons_or_noncons_roles if alt_role_candiates[finance_statement] in x and x not in roles]
-        # for name in role_candiates[finance_statement]:
-        #     roles += [x for x in other_roles if name in x and x not in roles]
-        # if not roles: roles += [x for x in other_roles if alt_role_candiates[finance_statement] in x and x not in roles]
         if self.reader.xbrl_doc.accounting_standard=='if':
             rolesIFRS = [x for x in roles if x.endswith('IFRS')]
             if rolesIFRS: return rolesIFRS
@@ -279,7 +243,7 @@ class Finance(BaseParser):
             return thiscol, prevcol
         def analyze_column(label, columns, tc, pc):
             def adjust(columns, idx):
-                for i in range(2):
+                for i in range(3):
                     if columns[idx+i].text.strip().replace(',','').isdigit():
                         return i
                 return 0
