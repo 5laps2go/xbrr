@@ -1,5 +1,6 @@
 import collections
 import importlib
+import itertools
 import re
 import warnings
 from logging import getLogger
@@ -102,9 +103,10 @@ class Finance(BaseParser):
 
             'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
         }
-        fix_cal = ['GrossProfit','GrossProfitNetGP','OperatingGrossProfit',  # '~^GrossProfit.{,5}$', 1848:2011-05-11 fail, 
+        fix_cal = ['GrossProfit','GrossProfitNetGP','OperatingGrossProfit','GrossProfitIFRS',  # '~^GrossProfit.{,5}$', 1848:2011-05-11 fail, 
                    'OperatingIncome', 'OperatingProfitLossIFRS','<OperatingIncome','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
                    'OrdinaryIncome','OrdinaryIncomeBNK','>OrdinaryProfitLoss','~(Operating|Ordinary)[Ll]oss$',
+                   'ProfitLossBeforeTax','ProfitLossBeforeTaxIFRS',  # 2282:2022-05-10
                    'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
 
         roles = self.__find_role_name('pl', latest_filter)
@@ -232,15 +234,29 @@ class Finance(BaseParser):
             ks = sorted(c.keys(), key=int)
             return "-".join([str(c[x]) for x in ks])
         def analyze_title(columns, thiscol, prevcol, this_str, prev_str):
-            collen = sum([int(c.get('colspan','1')) for c in columns])
-            idx = 0
-            for c in columns:
-                if c.text.strip().startswith('前') or c.text.strip().startswith(prev_str):
-                    prevcol = idx - collen
-                elif c.text.strip().startswith('当') or c.text.strip().startswith(this_str):
-                    thiscol = idx - collen
-                idx = idx + int(c.get('colspan','1'))
+            def col_year(c):
+                years = [int(x) for x in re.split('[^\d]',c.text) if x!='' and int(x)>1900]
+                if c.text.strip().startswith('前') and '増減' not in c.text:
+                    return 1
+                elif c.text.strip().startswith('当'):
+                    return 9999
+                elif years:
+                    return years[0]
+                return -1
+            colindex = list(itertools.accumulate([int(c.get('colspan','1')) for c in columns]))
+            year_index = sorted([(col_year(c),colindex[i-1]-colindex[-1]) for i,c in enumerate(columns) if col_year(c)>0], key=lambda x: x[1])
+            if len(year_index) > 0: thiscol = year_index[0][1]
+            if len(year_index) > 1:
+                prevcol = year_index[1][1]
+                if year_index[0][0] < year_index[1][0]: thiscol, prevcol = prevcol, thiscol
             return thiscol, prevcol
+            # for c in columns:
+            #     if c.text.strip().startswith('前') and '増減' not in c.text or c.text.strip().startswith(prev_str):
+            #         prevcol = idx - collen
+            #     elif c.text.strip().startswith('当') or c.text.strip().startswith(this_str):
+            #         thiscol = idx - collen
+            #     idx = idx + int(c.get('colspan','1'))
+            # return thiscol, prevcol
         def analyze_column(label, columns, tc, pc):
             def adjust(columns, idx):
                 for i in range(3):
