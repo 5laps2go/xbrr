@@ -3,7 +3,8 @@ import os
 import itertools
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Literal
+from enum import Enum, auto
 from urllib.parse import urljoin
 from logging import getLogger
 
@@ -168,29 +169,13 @@ class Reader(BaseReader):
         self.mark_subtotal_as_parent(nodes, context_vdic)
 
     def clean_deleted_presentation(self, nodes):
-        remove = []
-        parent_children = {}
         for name,node in nodes.items():
-            for x in node.parents:
-                parent_name = x['parent'].name
-                list = parent_children.get(parent_name, [])
-                parent_children[parent_name] = [node] + list
-            if node.clean_parent_link() and not node.parents:
-                remove.append(node)
-
-        for delnode in remove:
-            for cnode in parent_children.get(delnode.name,[]):
-                cnode.remove_parent(delnode)
+            if node.is_deleted_parent_link_only():
+                node.remove_children()
     
     def clean_deleted_calculation(self, nodes):
         for name,node in nodes.items():
-            remain = []
-            for x in node.derives:
-                if x['use']=='deleted':
-                    x['target'].update_derive_count(-1)
-                else:
-                    remain.append(x)
-            node.derives = remain
+            node.omit_deleted_derives()
 
     def mark_subtotal_as_parent(self, nodes, context_vdic):
         parent_children = {}
@@ -199,23 +184,43 @@ class Reader(BaseReader):
             parent_children[node.parent_name] = parent_children.get(node.parent_name, []) + [node]
         for name in parent_children:
             if name not in context_vdic: continue
-            comparison = nodes[name].compare_subtotal(parent_children[name], context_vdic)
-            if len(parent_children[name]) > 1 and comparison == 0:
-                nodes[name].parents[0]['priority'] = -999 # this is the subtotal as parent
-            elif comparison == 1:
-                nodes[name].parents[0]['priority'] = -997 # this is the subtotal but not sum children
-            else:
-                nodes[name].parents[0]['priority'] = -998 # this is the subtotal but not enough children have
+            if len(parent_children[name]) >= 1:
+                nodes[name].mark_subtotal(parent_children[name], context_vdic)
 
     def patch_calc_node_tree(self, context_value_dic, nodes, preserve_cal:Dict, fix_cal_node):
-        preserve_parents = set(sum(preserve_cal.values(),[]))
-        self.fix_not_preserve_link('cal', nodes, preserve_cal, preserve_parents)
+        self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
+
+        if self.validate_calc_node_tree(context_value_dic, nodes, preserve_cal.keys()):
+            return
+        
+        # preserve_parents = set(sum(preserve_cal.values(),[]))
+        # self.fix_not_preserve_link('cal', nodes, preserve_cal, preserve_parents)
         self.clean_deleted_calculation(nodes)
         
         self.fix_calc_link_for_parent_subtotal(nodes, context_value_dic)
-        self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
+        # self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
         self.fix_extra_calc_link(nodes, fix_cal_node, context_value_dic)
         self.fix_missing_calc_link(nodes, fix_cal_node, context_value_dic)
+
+    def validate_calc_node_tree(self, context_value_dic, nodes, cal_keys):
+        has_derived = False
+        leaf_nodes = []
+        for name in nodes:
+            # NetIncome = nodes[name].no_derive() but not nodes[name].no_derived()
+            if nodes[name].no_derive() and cvalue(nodes[name], context_value_dic) != 0:
+                if not leaf_nodes:
+                    leaf_nodes = sorted([nodes[n] for n in context_value_dic.keys()], key=lambda x: x.derivation_order)
+                ind = leaf_nodes.index(nodes[name])
+                if ind+1 < len(leaf_nodes) and not leaf_nodes[ind+1].no_derive():
+                    if 'Attributable' in name: continue # jppfs_cor_ProfitLossAttributableToOwnersOfParent is 内訳 of ProfitLoss
+                    print('found: ', name)
+                    return False
+            if nodes[name].has_derived():
+                has_derived = True
+                if not nodes[name].validate(context_value_dic):
+                    print('found: ', name)
+                    return False
+        return has_derived
 
     def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role):
         def get_name(loc):
@@ -284,13 +289,13 @@ class Reader(BaseReader):
         def make_missing_link(derived, orphans):
             if derived is None or not orphans:
                 return
-            derived_value, diff, epsilon = derived.cvalue(context_vdic, nodes.values())
+            derived_value, diff, epsilon = derived.cvalue(context_vdic)
             if abs(diff) < epsilon and (not orphans or (nmmatch(orphans[0].name, fix_cal_node))): # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 return
-            orphan_values = [x.cvalue(context_vdic, nodes.values())[0] for x in orphans]
+            orphan_values = [x.cvalue(context_vdic)[0] for x in orphans]
             for pat in [[1], [-1], [1,1], [-1,1], [-1,0,1], [-1,1,1], [0,-1,1], [-1,-1,1], [1,-1,1],
                         [-1,0,0,1], [1,0,0,1], [-1,-1,-1,1],    # -1,-1,-1,1:85950 ジャフコ　　　　　　　　　　2013-04-19 15:15:00: 平成25年3月期 決算短信
-                        [-1,1,-1,-1,1], [1,-1,1,-1,1], [-1,1,1,-1,1], [-1,1,1,1,-1,1]]:
+                        [-1,1,-1,-1,1], [1,-1,1,-1,1], [-1,1,1,-1,1], [-1,1,1,1,-1,1], [1,-1,1,-1,1,-1,-1,1]]: # [1,-1,1,-1,1,-1,-1,1]:2282:2022-05-10
                 if len(pat) > len(orphans): continue
                 pat2 = list(pat) + [0] * (len(orphans) - len(pat))
                 vs = [pat2[i]*orphan_values[i] for i in range(len(pat2))]
@@ -300,7 +305,7 @@ class Reader(BaseReader):
                     if has_unnecessary_derived: # 1853:2015-08-07: GrossProfit has several gross profits calc link
                         removed = derived.remove_derive_all_children(nodes.values())
                         if not removed: break
-                        removed = [x for x in removed if x in [orphans[i] for i in range(len(pat2)) if pat2[i]==0]]
+                        removed = [x for x in removed if x not in [orphans[i] for i in range(len(pat2)) if pat2[i]==1]]
                     for i in range(len(pat2)):
                         if pat2[i]!=0:
                             self.logger.debug("!{} --> {}:w{}".format(derived.name, orphans[i].name, pat[i]))
@@ -325,14 +330,14 @@ class Reader(BaseReader):
     
     def fix_extra_calc_link(self, nodes, fix_cal_node, context_vdic):
         def eliminate_extra_link(node):
-            derives = sorted([v for v in nodes.values() if v.name in context_vdic and v.has_derive(node)], reverse=True, key=lambda x: x.derivation_order)
-            node_value, diff, epsilon = node.cvalue(context_vdic, derives)
+            derives = sorted([v for v in node.get_derived() if v.name in context_vdic], reverse=True, key=lambda x: x.derivation_order)
+            node_value, diff, epsilon = node.cvalue(context_vdic)
             if abs(diff) < epsilon or node_value+diff==0:
-                for remove in node.validate_or_remove_derive_children(context_vdic, nodes.values()):
+                for remove in node.validate_or_remove_derive_children(context_vdic):
                     self.logger.debug("#validate_or_remove_derive_children: {} X-> all".format(remove.name))
                 return
             # found extra derives
-            derives_values = [float(v.get_weight(node)) * float(context_vdic[v.name].value) for v in derives]
+            derives_values = [v.get_weight(node) * float(context_vdic[v.name].value) for v in derives]
             for pat in [(1,0),(0,0,1,1,1,1),(1,1),(1,0,1),(1,1,1),(1,0,0,1),(1,0,0,0,1),(1,1,0,1,1),(1,0,0,0,0,1),(0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)]:
                 vs = [pat[i]*derives_values[i] for i in range(min(len(pat),len(derives)))]
                 if abs(sum(vs)-node_value) < epsilon:
@@ -364,7 +369,7 @@ class Reader(BaseReader):
                 continue
             # children make subtotal
             parent_node = nodes[parent_name]
-            if parent_node.validate(context_vdic, nodes.values()):
+            if parent_node.validate(context_vdic):
                 continue
             # parent derives one of children:  64690 放電精密　　　　　　　　　　2012-04-03 16:30:00: 平成24年2月期 決算短信[日本基準](連結)
             if parent_node.is_subtotal() and parent_node.get_derive() in children:
@@ -382,7 +387,7 @@ class Reader(BaseReader):
             if node.parent_name is None: continue
             _parent_children[node.parent_name] = _parent_children.get(node.parent_name, []) + [node]
         for name in _parent_children:
-            sortedlist = sorted(_parent_children[name], key=lambda x: float(x.order))
+            sortedlist = sorted(_parent_children[name], key=lambda x: x.order)
             subtotal = sortedlist[-1]
             if name in context_vdic or subtotal.name in context_vdic:
                 parent_children[name] = sortedlist
@@ -407,7 +412,7 @@ class Reader(BaseReader):
         # nodes preserves child, parent order (derived, derives order)
         for name in nodes:
             n = nodes[name]
-            while n is not None and n.derived_count==0 and len(n.derives)> 0 \
+            while n is not None and n.no_derived() and not n.no_derive() \
                  and (n.name not in context_vdic or no_current_value(n.name)):
                 derive = n.get_derive()
                 n.remove_derive_all()
@@ -433,7 +438,6 @@ class Reader(BaseReader):
                 empty_order = float(n.order)
             else:
                 parents = parents + [n] + ([""] * (parent_depth - len(parents) - 1))
-                # empty_order = 99.0 if n.is_subtotal() else 0.0
                 empty_order = 0.0
 
             for i, p in zip(reversed(range(parent_depth)), parents):
@@ -565,54 +569,40 @@ class Reader(BaseReader):
 class Node():
     epsilon_value = 0
 
+    class Marker(Enum):
+        subtotal = auto()
+        subtotal_with_fewer_children = auto()
+        subtotal_with_extra_children = auto()
+        normal_node = auto()
+
     def __init__(self, element, order=0):
         self.element = element
-        self.prohibited = None # (parent, order, priority)
-        self.parents = []       # e: {'parent':Node, 'order': str, 'priority': str}
-        self.children_count = 0
-        self.derives = []       # e: {'target':Node, 'use':str, 'order':str, 'priority':str, 'weight':str}
-        self.derived_count = 0
+        self.plinks = DirectedLinks("plink")
+        self.clinks = DirectedLinks("clink")
+        self.marker:Node.Marker = Node.Marker.normal_node
 
     @property
-    def parent_name(self):
-        if not self.parents:
-            return None
-        return self.parents[0]['parent'].name
-
+    def parents(self):
+        return self.get_parent()
+    
     @property
-    def order(self):
-        if len(self.parents) > 1:
-            self.debug_print = 'more than two parents found at {}: {}'.format(self.name, [x['parent'].name for x in self.parents])
-        return self.parents[0]['order'] if self.parents else 0
+    def order(self) -> float:
+        plinks = self.plinks.active_src
+        if len(plinks) > 1:
+            self.debug_print = 'more than two parents found at {}: {}'.format(self.name, [l.l_from.name for l in plinks])
+        return plinks[0].order if plinks else 0
     
     def add_parent(self, parent, use:str, priority:str, order:str ):
-        if use=='prohibited':
-            for x in [x for x in self.parents if parent==x['parent'] and priority>x['priority'] and float(order)==float(x['order'])]:
-                x['priority'] = '-1'
-                x['parent'].children_count -= 1
-                return
-            self.prohibited = {'parent':parent, 'order':order, 'priority':priority}
-            return
-        if self.prohibited is not None:
-            if parent == self.prohibited['parent'] and float(order) == float(self.prohibited['order'])\
-                and priority < self.prohibited['priority']:
-                self.prohibited = None
-                self.parents.append({'parent':parent, 'priority':'-1', 'order':order})
-                return
-
-        self.parents.append({'parent':parent, 'priority':priority, 'order':order})
-        parent.children_count += 1
+        self.add_node(self.plinks, parent, use, float(priority), float(order))
 
     def remove_parent(self, parent):
-        parents = [x for x in self.parents if x['parent']!=parent]
-        if len(parents)!=len(self.parents):
-            parent.children_count -= 1
-            self.parents = parents
+        self.remove_link(self.plinks.src, parent)
+    
+    def remove_children(self):
+        self.remove_link_all(self.plinks.dst)
 
-    def clean_parent_link(self):
-        length = len(self.parents)
-        self.parents = [x for x in self.parents if x['priority']!='-1']
-        return length != len(self.parents)
+    def is_deleted_parent_link_only(self):
+        return self.plinks.src and len(self.plinks.active_src)==0
 
     @property
     def name(self):
@@ -628,7 +618,7 @@ class Node():
 
     @property
     def is_leaf(self):
-        return self.children_count == 0
+        return len(self.plinks.active_dst) == 0
     
     @property
     def depth(self):
@@ -653,9 +643,7 @@ class Node():
         return parents[0].name if parents else None
     
     def get_parent(self):
-        if self.parents:
-            return [x['parent'] for x in self.parents]
-        return []
+        return self.plinks.active_src_nodes()
 
     def get_ascendants(self):
         parents = []
@@ -664,6 +652,33 @@ class Node():
             parents.insert(0, ps[0])
             ps = ps[0].get_parent()
         return parents
+    
+    def links(self, links):
+        return self.plinks if links.type=='plink' else self.clinks
+    
+    def get_prev_sibling(self, links):
+        srcs = links.active_src_nodes()
+        if not srcs: return None
+        siblings = srcs[0].links(links).active_dst_nodes(order=True)
+        index = siblings.index(self)
+        return siblings[index-1] if index>0 else None
+
+    def get_next_leaf(self):
+        plink = next(iter(self.plinks.active_src), None)
+        if plink:
+            links = [l for l in plink.l_from.plinks.dst if l.order > plink.order]
+            if links:
+                clink = min(links, key=lambda l: l.order)
+                return clink.l_to.get_first_leaf()
+            else:
+                return plink.l_from.get_next_leaf()
+        return None
+
+    def get_first_leaf(self):
+        if self.is_leaf:
+            return self
+        clink = min(self.plinks.active_dst, key=lambda l: l.order)
+        return clink.l_to.get_first_leaf()
 
     def add_derive(self, target, use:str, priority:str, order:str, weight:str):
         if not self.parents or not target.parents:
@@ -673,42 +688,35 @@ class Node():
             return
         # GrossProfit, ProvisionForSalesReturnsGP, GrossProfitNetGP case disables subtotal relationship
         if self.is_subtotal_and_derived_children(target):
-            if self.parents: self.parents[0]['priority'] = 0
+            self.marker = Node.Marker.normal_node
 
         self._add_derive(target, use, priority, order, weight)
 
     def _add_derive(self, target, use:str, priority:str, order:str, weight:str):
-        # if not self.parents or not target.parents:
-        #     return
-        # if not self.can_add_derive(target):
-        #     # print('bad calc found:{} ==> {}'.format(target.name, self.name))
-        #     return
-        # # GrossProfit, ProvisionForSalesReturnsGP, GrossProfitNetGP case disables subtotal relationship
-        # if self.is_subtotal_and_derived_children(target):
-        #     if self.parents: self.parents[0]['priority'] = 0
-        use_save = use
-        # order shuld be added??: 40800 田中化研　　　　　　　　　　2012-05-10 16:00:00: 平成24年3月期 決算短信[日本基準](非連結)
-        target_derives = [x for x in self.derives if x['target']==target and x['order']==order]
-        for x in target_derives:
-            if x['use']=='' and use=='' and x['priority'] >= priority:
-                return
-            # float(x['order']) may change float(order)
-            assert x['use'] in ['prohibited','deleted'] and use=='' and x['priority'] > priority or \
-                x['use']=='' and use=='prohibited' and x['priority'] < priority or \
-                x['use']=='' and use=='' and x['priority'] < priority or \
-                use=='optional'
-            self.derives.remove(x)
-            if x['use']=='deleted': target.update_derive_count(-1)
-            if x['use']=='prohibited':
-                priority = x['priority']
-                weight = x['weight']
-                use_save = 'deleted'
-            if use=='prohibited':
-                use_save = 'deleted'
-            if use=='optional':
-                use_save = ''
-        self.derives.append({'target':target, 'use':use_save, 'priority':priority, 'order':order, 'weight':weight})
-        if use=='': target.update_derive_count(+1)
+        self.add_node(self.clinks, target, use, float(priority), float(order), float(weight))
+
+    def add_node(self, dlinks, target, use:str, priority:float, order:float, weight:float=-1):
+        active_src = [l for l in dlinks.src if l.is_link(target, self, order)]
+        if not active_src:
+            link = Link(target, self, order, use, priority, weight)
+            dlinks.src.append(link)
+            target.add_link_dst(dlinks, link)
+        else:
+            active_src[0].set_properties(use, priority, weight)
+
+    def add_link_dst(self, dlinks, link):
+        if dlinks.type == 'clink':
+            self.clinks.dst.append(link)
+        elif dlinks.type == 'plink':
+            self.plinks.dst.append(link)
+
+    def remove_link(self, src_links:List, target):
+        for l in [l for l in src_links if l.is_link(target, self)]:
+            l.delete()
+
+    def remove_link_all(self, links:List):
+        for l in [l for l in links if l.is_active()]:
+            l.delete()
 
     def can_add_derive(self, target):
         if self.is_subtotal():
@@ -732,24 +740,21 @@ class Node():
                 pass
     
     def remove_derive_all(self):
-        for x in [x for x in self.derives if x['use']!='prohibited']:
-            x['target'].update_derive_count(-1)
-        self.derives = []
+        for l in self.clinks.src:
+            l.delete()
     
     def remove_derive(self, target):
-        derives = [x for x in self.derives if x['target']!=target]
-        if len(derives)!=len(self.derives):
-            target.update_derive_count(-1)
-            self.derives = derives
+        for l in [l for l in self.clinks.src if l.is_link(target, self)]:
+            l.delete()
     
     def remove_derive_all_children(self, nodes):
-        removed = [x for x in nodes if x.has_derive(self)]
+        removed = self.clinks.active_dst_nodes()
         for x in removed:
             x.remove_derive(self)
         return removed
     
-    def remove_derive_children(self, nodes):
-        removed = [x for x in nodes if x.has_derive(self)]
+    def remove_derive_children(self):
+        removed = self.clinks.active_dst_nodes()
         if not all([x.no_derived() for x in removed]):
             print('%%%%%% remove_derive_children: {} has derived child, so skip remove'.format(self.name))
             return []
@@ -758,34 +763,32 @@ class Node():
         return removed
     
     def omit_deleted_derives(self):
-        deletes = [x for x in self.derives if x['use']=='deleted']
-        for x in deletes:
-            x['target'].update_derive_count(-1)
-            self.derives.remove(x)
+        return
     
-    def cvalue(self, context_vdic, nodelist):
+    def cvalue(self, context_vdic):
         value = cvalue(self, context_vdic)
-        calc_values = [float(v.get_weight(self)) * cvalue(v, context_vdic) for v in nodelist if v.has_derive(self)]
+        to_target = self.clinks.active_dst_nodes()
+        calc_values = [v.get_weight(self) * cvalue(v, context_vdic) for v in to_target]
         diff = sum(calc_values) - value
         epsilon = epsvalue(context_vdic.get(self.name,None), calc_values)
         return value, diff, epsilon
     
-    def validate(self, context_vdic, nodelist):
-        value, diff, epsilon = self.cvalue(context_vdic, nodelist)
+    def validate(self, context_vdic):
+        value, diff, epsilon = self.cvalue(context_vdic)
         return abs(diff) < epsilon
     
-    def validate_or_remove_derive_children(self, context_vdic, nodelist):
+    def validate_or_remove_derive_children(self, context_vdic):
         removed = []
-        for node in [v for v in nodelist if v.has_derive(self) and v.has_derived()]:
-            value,diff,e = node.cvalue(context_vdic, nodelist)
+        for node in self.clinks.active_dst_nodes():
+            value,diff,e = node.cvalue(context_vdic)
             if abs(diff) > e:
-                if node.remove_derive_children(nodelist):
+                if node.remove_derive_children():
                     removed.append(node)
         return removed
 
     def compare_subtotal(self, children, context_vdic):
         def f(v, target):
-            return float(v.get_weight(target)) if v.get_weight(target) is not None else 1.0
+            return v.get_weight(target) if v.get_weight(target) is not None else 1.0
         if context_vdic[self.name].unit not in ['JPY','USD']: # TODO: it must be len()!=3 or format!='numdotdecimals'
             return False
         result = cvalue(self, context_vdic)
@@ -798,11 +801,14 @@ class Node():
         return -1
 
     def get_derives(self):
-        return sorted([x for x in self.derives if x['use']!='prohibited'], key=lambda x: x['use'])
+        return sorted([x for x in self.derives if x['use'] not in ['prohibited','deleted']], key=lambda x: x['use'])
     
     def get_derive(self):
-        derives = self.get_derives()
-        return derives[0]['target'] if derives else None
+        derives = self.clinks.active_src_nodes()
+        return derives[0] if derives else None
+
+    def get_derived(self):
+        return self.clinks.active_dst_nodes()
 
     def update_derive_count(self, diff:int):
         self.derived_count += diff
@@ -811,35 +817,36 @@ class Node():
         return self._get_derive_chain([])
     def _get_derive_chain(self, path0):
         path = path0 + [self]
-        active_chains = [[x['target'], *x['target']._get_derive_chain(path)] for x
-            in self.get_derives() if x['target'] not in path]
+        from_target = self.clinks.active_src_nodes()
+        active_chains = [[x, *x._get_derive_chain_(path)] for x
+            in from_target if x not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
         if len(sorted_chains) > 1: print("!!! get_derive_chain:",sorted_chains)
         return sorted_chains[0] if len(sorted_chains) > 0 else []
 
     def has_derive(self, target):
-        derives = [x['target'] for x in self.derives if x['use']!='prohibited']
-        if target in derives:
-            return True
-        return False
+        derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
+        return derive_links
 
-    def get_weight(self, target):
-        derives = [x['weight'] for x in self.derives if x['use']!='prohibited' and x['target']==target]
-        return derives[0] if len(derives)>0 else None
+    def get_weight(self, target) -> float:
+        derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
+        return derive_links[0].weight if len(derive_links)>0 else None
 
     def minus_weight(self, target):
-        for x in [x for x in self.derives if x['use']!='prohibited' and x['target']==target]:
-            x['weight'] = '-1'
+        derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
+        if derive_links:
+            link = derive_links[0]
+            link.set_properties(link.use, link.priority, -1)
 
     def has_derived(self):
-        return self.derived_count > 0
+        return len(self.clinks.active_dst) > 0
     
     def no_derived(self):
-        return self.derived_count == 0
-    
+        return len(self.clinks.active_dst) == 0
+
     def no_derive(self):
-        return not any([x['use'] not in ['prohibited','deleted'] for x in self.derives])
-    
+        return len(self.clinks.active_src) == 0
+
     def need_to_derive_value(self, context_vdic:Dict[str, ElementValue], fix_cal_node):
         parents = self.get_parent()
         # omit quasi subtotal that subtotal is not fix_cal_node
@@ -852,6 +859,18 @@ class Node():
             return False
         return any([t(x.name) in preserve_parent_names for x in self.get_derive_chain()])
     
+    def mark_subtotal(self, children, context_vdic):
+        comparison = self.compare_subtotal(children, context_vdic)
+        plinks = self.plinks.active_src         # TODO: it is not necessary
+        if not plinks:
+            return
+        if comparison == 0:
+            self.marker = Node.Marker.subtotal                      # this is the subtotal as parent
+        elif comparison == 1:
+            self.marker = Node.Marker.subtotal_with_extra_children  # this is the subtotal but not sum children
+        else:
+            self.marker = Node.Marker.subtotal_with_fewer_children  # this is the subtotal but not enough children have
+
     def is_subtotal_fewer_children(self):
         parents = self.get_parent()
         if parents and parents[0].is_subtotal_with_fewer_children():
@@ -859,10 +878,10 @@ class Node():
         return False
     
     def is_subtotal(self):
-        return self.parents and self.parents[0]['priority'] in [-999]
+        return self.marker in [Node.Marker.subtotal]
 
     def is_subtotal_with_fewer_children(self):
-        return self.parents and self.parents[0]['priority'] in [-998]
+        return self.marker in [Node.Marker.subtotal_with_fewer_children]
 
     children_list = {}
     base_node = None
@@ -878,10 +897,11 @@ class Node():
         return self._get_derive_subpath([])
     def _get_derive_subpath(self, path0):
         path = path0 + [self]
-        if len(self.derives)==0 and self.element.data_type in ['monetary','perShare']:
+        if len(self.clinks.src)==0 and self.element.data_type in ['monetary','perShare']:
             return [(Node.base_node.get_child_index(self),'1')]
-        active_chains = [[(x['target'].get_child_index(self),x['weight']), *x['target']._get_derive_subpath(path)] for x
-            in self.derives if x.get('use','') !='prohibited' and x['target'] not in path]
+        derives = [(l.l_from,str(l.weight)) for l in self.clinks.active_src]
+        active_chains = [[(x.get_child_index(self), w), *x._get_derive_subpath(path)] for (x,w)
+            in derives if x not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
         return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self),'1')]
 
@@ -899,7 +919,75 @@ class Node():
         sign = sum_sign(path)
         sign_str = ('-' if sign%2==1 else '*') if sign>0 else '+'
         path_str = ''.join([x[0] for x in path])
-        return sign_str + path_str if self.derived_count==0 else path_str
+        return sign_str + path_str if self.no_derived() else path_str
+
+class DirectedLinks():
+
+    def __init__(self, type:Literal["plink","clink"]):
+        self.type = type
+        self.src = []
+        self.dst = []
+
+    @property
+    def active_src(self):
+        return [l for l in self.src if l.is_active()]
+
+    def active_src_nodes(self):
+        return [l.l_from for l in self.src if l.is_active()]
+
+    @property
+    def active_dst(self):
+        return [l for l in self.dst if l.is_active()]
+
+    def active_dst_nodes(self, order=False):
+        if order:
+            return [l.l_to for l in sorted(self.dst, key=lambda l: l.order) if l.is_active()]
+        return [l.l_to for l in self.dst if l.is_active()]
+
+class Link():
+
+    def __init__(self, l_from:Node, l_to:Node, order:float, use:str, priority:float, weight:float=-1):
+        self.l_from = l_from
+        self.l_to = l_to
+        self.order = order
+        self.use = use if use!='optional' else ''
+        self.priority = priority
+        self.weight = weight
+    
+    def is_link(self, l_from:Node, l_to:Node, order:float=-1):
+        return self.l_from == l_from and self.l_to == l_to \
+            and (order<0 or self.order == order)
+
+    def is_active(self):
+        return self.use == ''
+
+    def delete(self):
+        self.use = 'deleted'
+
+    def set_properties(self, use:str, priority:float, weight:float=-1):
+        if self.use=='' and use=='' and self.priority>=priority:
+            return
+        if self.use=='' and use=='prohibited' and self.priority < priority:
+            self.use = 'deleted'
+        elif self.use=='prohibited' and use=='' and self.priority > priority:
+            self.use = 'deleted'
+            priority = self.priority
+            weight = self.weight
+        elif self.use=='deleted':
+            self.use = use if use!='optional' else ''
+        self.priority = priority
+        self.weight = weight
+    
+    def to_dict(self):
+        result = {
+            "from": self.l_from.name,
+            "to": self.l_to.name,
+            "order": self.order,
+            "use": self.use,
+            "priority": self.priority
+        }
+        return result if self.weight < 0 else result | {"weight": self.weight}
+
 
 def epsilon(value):
     return (1000 if value%10**6 else 10**6 if value%10**9 else 10**9)
@@ -911,11 +999,13 @@ def epsvalue(ev:ElementValue, values):
     return Node.epsilon_value * (len(values)+2)
 
 def cvalue(node:Node, vdic):
-    return float(vdic[node.name].value) if node.name in vdic else 0
+    if node.name not in vdic or '円' in vdic[node.name].value:
+        return 0
+    return float(vdic[node.name].value)
 
 def subtotal(target, children, vdic):
     def f(v, target):
-        return float(v.get_weight(target)) if v.get_weight(target) is not None else 1.0
+        return v.get_weight(target) if v.get_weight(target) is not None else 1.0
     calc_values = [f(v, target) * cvalue(v, vdic) for v in children]
     return sum(calc_values)
 
