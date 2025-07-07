@@ -15,6 +15,7 @@ class Taxonomy(BaseTaxonomy):
         "2007-06-30": "http://www.xbrl.tdnet.info/download/taxonomy/tse-ed-2011-06-30.zip",
         "2008-02-01": "http://www.xbrl.tdnet.info/download/taxonomy/tse-o-di-2008-02-01.zip",
         "2014-01-12": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/61_taxonomy.zip",
+        "2025-01-31": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/TDnet_Quarterly_Financial_Statements_Taxonomy.zip",
     }
 
     def __init__(self, taxonomy_root):
@@ -29,8 +30,9 @@ class Taxonomy(BaseTaxonomy):
 
     def identify_version(self, namespace:str) -> str:
         # 2007-06-30:   http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30
+        # 2025-01-31:   http://www.xbrl.tdnet.info/taxonomy/jp/tse/tdnet/atcrp/2025-01-31/tse-atcrp-t
         version = ''
-        m = re.match(r'http://.*.tdnet.info/(taxonomy/jp/tse/tdnet/[^/]{2}/[^/]/(\d{4}-\d{2}-\d{2})|jp/br/tdnet/[^/]/[^/]{2}/(\d{4}-\d{2}-\d{2}))', namespace)
+        m = re.match(r'http://.*.tdnet.info/(taxonomy/jp/tse/tdnet/[^/]{2}/[^/]/(\d{4}-\d{2}-\d{2})|taxonomy/jp/tse/tdnet/[^/]{5}/(\d{4}-\d{2}-\d{2})|jp/br/tdnet/[^/]/[^/]{2}/(\d{4}-\d{2}-\d{2}))', namespace)
         if m != None:
             version = m.group(2) if m.group(2) else m.group(3)
         return version
