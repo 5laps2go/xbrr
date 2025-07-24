@@ -1,6 +1,8 @@
 import os
-import datetime
 import unittest
+from datetime import datetime
+from bs4.element import NavigableString, Tag, PageElement
+
 from xbrr.tdnet.reader.doc import Doc
 
 
@@ -19,7 +21,7 @@ class TestDoc(unittest.TestCase):
     def test_doc(self):
         doc = Doc(root_dir=self.root_dir, xbrl_kind="public")
 
-        self.assertEqual(doc.published_date[0], datetime.datetime(2021, 7, 14, 0, 0))
+        self.assertEqual(doc.published_date[0], datetime(2021, 7, 14, 0, 0))
         self.assertEqual(doc.published_date[1], 'a')
         self.assertEqual(doc.company_code, '36450')
 
@@ -30,6 +32,7 @@ class TestDoc(unittest.TestCase):
 
         bs = doc.read_ixbrl_as_xbrl()
         xbrl = bs.find('xbrli:xbrl')
+        assert isinstance(xbrl, Tag)
         self.assertEqual(len(xbrl.attrs), 12)
         self.assertEqual(len(list(xbrl.find_all('context'))), 37)
         self.assertEqual(len(xbrl.contents), 221)
@@ -40,6 +43,7 @@ class TestDoc(unittest.TestCase):
 
         bs = doc.read_ixbrl_as_xbrl()
         xbrl = bs.find('xbrli:xbrl')
+        assert isinstance(xbrl, Tag)
         self.assertEqual(len(xbrl.attrs), 9)
         self.assertEqual(len(list(xbrl.find_all('context'))), 5)
         self.assertEqual(len(list(xbrl.find_all('unit'))), 2)

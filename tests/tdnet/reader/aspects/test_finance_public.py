@@ -19,7 +19,6 @@ class TestFinancePublic(unittest.TestCase):
         root_dir = os.path.join(_dir, "081220210818487667")
         xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="public")
         cls.reader = Reader(xbrl_doc, save_dir=_dir)
-        cls._dir = _dir
 
     @classmethod
     def tearDownClass(cls):
@@ -45,7 +44,7 @@ class TestFinancePublic(unittest.TestCase):
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information
-        self.assertIsNone(feature.value)
+        self.assertIsNone(feature)
         # self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
         # self.assertEqual(feature.label, "セグメント情報等")
         # self.assertEqual(feature.context, "CurrentYearDuration")

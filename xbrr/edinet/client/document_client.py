@@ -131,8 +131,7 @@ class DocumentClient(BaseClient):
 
         path = self.get(document_id, response_type, save_dir, file_name)
 
-        if expand_level is None or not expand_level or\
-           expand_level not in ("dir", "file"):
+        if expand_level == "":
             return path
         elif expand_level == "dir":
             xbrl_dir = path.parent.joinpath(document_id)

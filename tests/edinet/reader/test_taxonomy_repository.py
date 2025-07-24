@@ -33,8 +33,9 @@ class TestTaxonomyRepository(unittest.TestCase):
             'jpcrp_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2020-11-01/jpcrp_cor"
         }
         results = self.repository.load_schema_files(nsdecls)
-        self.assertEqual(1, len(results.schema_dicts))
+        self.assertEqual(2, len(results.schema_dicts))
         self.assertIn('2020-11-01', results.schema_dicts)
+        self.assertIn('2013-08-31', results.schema_dicts)
 
     def tests_load_schema_files_edinet(self):
         nsdecls = {
@@ -50,8 +51,9 @@ class TestTaxonomyRepository(unittest.TestCase):
             'jppfs_cor':"http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2018-03-31/jppfs_cor"
         }
         results = self.repository.load_schema_files(nsdecls)
-        self.assertEqual(1, len(results.schema_dicts))
+        self.assertEqual(2, len(results.schema_dicts))
         self.assertIn('2018-03-31', results.schema_dicts)
+        self.assertIn('2013-08-31', results.schema_dicts)
 
     def test_uri_to_path(self):
         result = self.repository.uri_to_path('http://disclosure.edinet-fsa.go.jp/taxonomy/jpigp/2020-11-01/jpigp_cor_2020-11-01.xsd')

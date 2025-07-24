@@ -1,8 +1,10 @@
 import collections
 import importlib
+import importlib.util
 import itertools
 import re
 import warnings
+import pandas as pd
 from logging import getLogger
 
 if importlib.util.find_spec("pandas") is not None:
@@ -42,7 +44,7 @@ class Finance(BaseParser):
 
     def get_company_name(self):
         value = self.get_value("company_name")
-        return value.value if value.value else 'not found'
+        return value.value if value else 'not found'
 
     @property
     def fiscal_year_end_date(self):
@@ -54,13 +56,13 @@ class Finance(BaseParser):
 
     @property
     def fiscal_period_kind(self):
-        if self._fiscal_period_kind.value is not None:
+        if self._fiscal_period_kind is not None:
             return self._fiscal_period_kind
-        if self.report_Q1.value=='true':
+        if self.report_Q1 and self.report_Q1.value=='true':
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q1")
-        if self.report_Q2.value=='true':
+        if self.report_Q2 and self.report_Q2.value=='true':
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q2")
-        if self.report_Q3.value=='true':
+        if self.report_Q3 and self.report_Q3.value=='true':
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q3")
         return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="FY")
 
@@ -149,7 +151,9 @@ class Finance(BaseParser):
             filtered = consolidated.query('~({})'.format(query), engine='python')
         filtered['depth'] = self.reader.shrink_depth(filtered['depth'], data['depth'])
         # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
-        filtered = filtered.query('~dimension.str.startswith("OperatingSegmentsAxis")', engine='python')
+        filtered = filtered.query('~dimension.str.contains("OperatingSegments")', engine='python')
+        # filtered = filtered.query('~dimension.str.contains("ComponentsOfEquity")', engine='python')
+        # set NetAssets member as name
         filtered.loc[filtered['member']!='','name']=filtered['member']
         filtered.loc[filtered['member']!='','depth']='+0'
         filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
@@ -235,7 +239,7 @@ class Finance(BaseParser):
             return "-".join([str(c[x]) for x in ks])
         def analyze_title(columns, thiscol, prevcol, this_str, prev_str):
             def col_year(c):
-                years = [int(x) for x in re.split('[^\d]',c.text) if x!='' and int(x)>1900]
+                years = [int(x) for x in re.split(r'[^\d]',c.text) if x!='' and int(x)>1900]
                 if c.text.strip().startswith('前') and '増減' not in c.text:
                     return 1
                 elif c.text.strip().startswith('当'):

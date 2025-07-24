@@ -1,18 +1,21 @@
 import collections
 import importlib
+import importlib.util
 import re
 import warnings
+import pandas as pd
 
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 
 from xbrr.base.reader.base_parser import BaseParser
+from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class Finance(BaseParser):
 
-    def __init__(self, reader):
+    def __init__(self, reader:BaseReader):
         tags = {
             "voluntary_accounting_policy_change": "jpcrp_cor:NotesVoluntaryChangesInAccountingPoliciesConsolidatedFinancialStatementsTextBlock",
             "segment_information": "jpcrp_cor:NotesSegmentInformationEtcConsolidatedFinancialStatementsTextBlock",
@@ -34,7 +37,7 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        bs = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
+        bs = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
         return self.__filter_duplicate(bs)
 
     def pl(self, ifrs=False):
@@ -49,7 +52,7 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal, fix_cal_node=fix_cal)
+        pl = self.reader.read_value_by_role(role_uri, preserve_cal=cal, fix_cal_node=fix_cal)
         return self.__filter_duplicate(pl)
 
     def cf(self, ifrs=False):
@@ -63,7 +66,7 @@ class Finance(BaseParser):
         role = role[0]
         role_uri = self.reader.get_role(role).uri
 
-        cf = self.reader.read_value_by_role(role_uri, preserve_pre=pre, preserve_cal=cal)
+        cf = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
         return self.__filter_duplicate(cf)
 
     def __filter_duplicate(self, data):

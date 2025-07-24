@@ -1,12 +1,14 @@
 from datetime import datetime
 
 from xbrr.base.reader.base_parser import BaseParser
+from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
+from xbrr.xbrl.reader.reader import Reader
 
 
 class Metadata(BaseParser):
 
-    def __init__(self, reader):
+    def __init__(self, reader:Reader):
         tags = {
             "edinet_code": "jpdei_cor:EDINETCodeDEI",
             "security_code": "jpdei_cor:SecurityCodeDEI",
@@ -48,28 +50,29 @@ class Metadata(BaseParser):
     @property
     def fiscal_year(self):
         value = self.get_value("fiscal_date_start")
-        year = datetime.strptime(value.value, "%Y-%m-%d").year if value.value else None
-        return ElementValue('fiscal_year', value=year)
+        year = datetime.strptime(value.value, "%Y-%m-%d").year if value else 1900
+        return year
 
     @property
     def fiscal_year_end_date(self):
         value = self.get_value("fiscal_date_end")
-        date = datetime.strptime(value.value, "%Y-%m-%d") if value.value else None
-        return ElementValue('fiscal_year_end_date', value=date)
+        date = datetime.strptime(value.value, "%Y-%m-%d") if value else None
+        return date
 
     @property
     def fiscal_month(self):
         value = self.get_value("fiscal_date_start")
-        month = datetime.strptime(value.value, "%Y-%m-%d").month if value.value else None
-        return ElementValue('fiscal_month', value=month)
+        month = datetime.strptime(value.value, "%Y-%m-%d").month if value else None
+        return month
     
     @property
     def fiscal_period_kind(self):
         if "_fiscal_period_kind" in self.tags:
-            return ElementValue('fiscal_period_kind', value=self._fiscal_period_kind.value)
-        elif "_annual" in self.tags:
+            assert self._fiscal_period_kind
+            return self._fiscal_period_kind.value
+        elif self._annual:
             kind = "FY" if self._annual.value=="true"\
-                else "Q1" if self._firstquarter.value=="true"\
-                else "Q2" if self._secondquarter.value=="true"\
+                else "Q1" if self._firstquarter and self._firstquarter.value=="true"\
+                else "Q2" if self._secondquarter and self._secondquarter.value=="true"\
                 else "Q3"
-            return ElementValue('fiscal_period_kind', value=kind)
+            return kind

@@ -5,7 +5,7 @@ from xbrr.xbrl.models.metadata import MetaData
 class Documents():
     """Document lists"""
 
-    def __init__(self, metadata: MetaData = None, documents: list = ()):
+    def __init__(self, metadata:MetaData = MetaData(), documents: list = []):
         """
         Keyword Arguments:
             count {MetaData} -- Metadata (default: {None}).

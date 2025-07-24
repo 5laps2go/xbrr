@@ -29,8 +29,7 @@ class TaxonomyRepository():
         schema_dicts = SchemaDicts()
         for taxonomy in self.taxonomies:
             versions = [taxonomy.identify_version(nsdecl) for nsdecl in nsdecls.values() if taxonomy.family in nsdecl]
-            if ''.join(versions):
-                version = max(versions)
+            for version in [v for v in set(versions) if v!='']:
                 taxonomy.provision(version)
                 dict = self.taxonomy_repo.get(version, {})
                 if not dict:

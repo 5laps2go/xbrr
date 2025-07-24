@@ -1,13 +1,15 @@
 import os
 import glob
 from datetime import datetime
+from pathlib import Path
+
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 from xbrr.edinet.reader.taxonomy import Taxonomy as EdinetTaxonomy
 from xbrr.base.reader.base_taxonomy import BaseTaxonomy
 
 class Doc(XbrlDoc):
 
-    def __init__(self, root_dir="", xbrl_kind=""):
+    def __init__(self, root_dir:str|Path="", xbrl_kind=""):
 
         def _xbrl_file(root_dir, kind):
             folder_dict = {'public': 'XBRL/PublicDoc', 'audit': 'XBRL/AuditDoc'}

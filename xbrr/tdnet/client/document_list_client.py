@@ -1,9 +1,8 @@
 import re
 from datetime import datetime
-from typing import Dict, Union
-
 import requests
 import urllib3
+import urllib3.util
 from bs4 import BeautifulSoup
 
 from xbrr.tdnet.models import Documents
@@ -18,7 +17,7 @@ class BaseDocumentListClient():
     def __init__(self):
         self.session = self.open_session()
 
-    def _get(self, date: Union[str, datetime]) -> Dict:
+    def _get(self, date:str|datetime) -> dict:
         """Get scraped document list.
 
         Arguments:
@@ -61,10 +60,10 @@ class BaseDocumentListClient():
         list_el = soup.select('#main-list-table > tr')
         for item_el in list_el:
             entry = {}
-            entry['pubdate'] = '{} {}:00'.format(date.strftime("%Y-%m-%d"), item_el.select_one("td.kjTime").text)
-            entry['company_code'] = item_el.select_one("td.kjCode").text
-            entry['company_name'] = item_el.select_one("td.kjName").text
-            entry['title'] = item_el.select_one("td.kjTitle").text.strip()
+            entry['pubdate'] = '{} {}:00'.format(date.strftime("%Y-%m-%d"), e.text if (e:=item_el.select_one("td.kjTime")) else '')
+            entry['company_code'] = e.text if (e:=item_el.select_one("td.kjCode")) else ''
+            entry['company_name'] = e.text if (e:=item_el.select_one("td.kjName")) else ''
+            entry['title'] = e.text.strip() if (e:=item_el.select_one("td.kjTitle")) else ''
             doc_el = item_el.select_one("td.kjTitle a")
             doc_el = item_el.select_one("td.kjTitle a")
             entry['document_url'] = None if doc_el is None \
@@ -72,8 +71,8 @@ class BaseDocumentListClient():
             xbrl_el = item_el.select_one("td.kjXbrl a")
             entry['url_xbrl'] =  None if xbrl_el is None \
                 else 'https://www.release.tdnet.info/inbs/{}'.format(xbrl_el['href'])
-            entry['markets_string'] = item_el.select_one("td.kjPlace").text
-            entry['update_history'] = item_el.select_one("td.kjHistroy").text
+            entry['markets_string'] = e.text if (e:=item_el.select_one("td.kjPlace")) else ''
+            entry['update_history'] = e.text if (e:=item_el.select_one("td.kjHistroy")) else ''
             tdnet = {'Tdnet': entry}
             items_l.append(tdnet)
         return items_l
@@ -90,7 +89,7 @@ class BaseDocumentListClient():
 class DocumentListClient(BaseDocumentListClient):
     """Client to get document list."""
 
-    def get(self, date: Union[str, datetime]) -> Documents:
+    def get(self, date:str|datetime) -> Documents:
         """Get metadeta response.
 
         Arguments:

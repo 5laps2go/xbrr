@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
@@ -8,7 +9,7 @@ from xbrr.base.reader.base_doc import BaseDoc
 
 class XbrlDoc(BaseDoc):
 
-    def __init__(self, package, root_dir="", xbrl_file=""):
+    def __init__(self, package, root_dir:str|Path="", xbrl_file=""):
         super().__init__(package, root_dir=root_dir, xbrl_file=xbrl_file)
         self._cache = {}
 

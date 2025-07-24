@@ -1,12 +1,13 @@
 from datetime import datetime
 
 from xbrr.base.reader.base_parser import BaseParser
+from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class Metadata(BaseParser):
 
-    def __init__(self, reader):
+    def __init__(self, reader:BaseReader):
         tags = {
             "edinet_code": "jpdei_cor:EDINETCodeDEI",
             "security_code": "jpdei_cor:SecurityCodeDEI",
@@ -26,17 +27,17 @@ class Metadata(BaseParser):
     @property
     def fiscal_year(self):
         value = self.get_value("fiscal_date_start")
-        year = datetime.strptime(value.value, "%Y-%m-%d").year if value.value else None
-        return ElementValue('fiscal_year', value=year)
+        year = datetime.strptime(value.value, "%Y-%m-%d").year if value else None
+        return year
 
     @property
     def fiscal_year_end_date(self):
         value = self.get_value("fiscal_date_end")
-        date = datetime.strptime(value.value, "%Y-%m-%d") if value.value else None
-        return ElementValue('fiscal_year_end_date', value=date)
+        date = datetime.strptime(value.value, "%Y-%m-%d") if value else None
+        return date
 
     @property
     def fiscal_month(self):
         value = self.get_value("fiscal_date_start")
-        month = datetime.strptime(value.value, "%Y-%m-%d").month if value.value else None
-        return ElementValue('fiscal_month', value=month)
+        month = datetime.strptime(value.value, "%Y-%m-%d").month if value else None
+        return month

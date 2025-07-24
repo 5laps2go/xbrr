@@ -4,7 +4,6 @@ import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.xbrl.reader.reader import Reader
 from xbrr.edinet.reader.doc import Doc
-import tests.edinet.reader.doc as testdoc
 from xbrr.edinet.reader.aspects.finance import Finance
 
 

@@ -1,6 +1,8 @@
-import datetime
 import re
 import unicodedata
+
+from xbrr.base.reader.base_reader import BaseReader
+from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class BaseParser():
@@ -8,7 +10,7 @@ class BaseParser():
     Element to Value
     """
 
-    def __init__(self, reader, value_class, tags=()):
+    def __init__(self, reader:BaseReader, value_class:type[ElementValue], tags:dict[str,str]={}):
         self.reader = reader
         self.value_class = value_class
         self.tags = {}
@@ -27,14 +29,16 @@ class BaseParser():
         _text = unicodedata.normalize("NFKC", _text)
         return _text
 
-    def get_value(self, name):
+    def get_value(self, name:str):
         value = self.reader.findv(self.tags[name])
-        if not value:
-            return self.value_class(self.tags[name], value=None)
+        # if not value:
+        #     return self.value_class(self.tags[name], value='#NotFound#')
         return value
 
-    def search(self, name, pattern):
+    def search(self, name:str, pattern:str):
         value = self.reader.findv(self.tags[name])
+        if not value:
+            return ''
         ptn = re.compile(pattern)
         tags = value.html.find_all(["p", "span"])
         text = ""
@@ -48,11 +52,13 @@ class BaseParser():
 
         return text
 
-    def extract_value(self, name, prefix="", suffix="",
-                      filter_pattern=None):
+    def extract_value(self, name, prefix:str="", suffix:str="",
+                      filter_pattern:str=""):
         value = self.reader.findv(self.tags[name])
+        if not value:
+            return ''
         text = value.html.text
-        if filter_pattern is not None:
+        if filter_pattern:
             text = self.search(name, filter_pattern)
 
         pattern = re.compile(f"({prefix}).+?({suffix})")

@@ -62,12 +62,10 @@ class Document():
 
     @classmethod
     def create(cls, body: dict) -> "Document":
-        def to_date(value, format):
-            if value:
-                f = "%Y-%m-%d" if format == "ymd" else "%Y-%m-%d %H:%M"
-                return datetime.strptime(value, f)
-            else:
-                return None
+        def to_date(value:str, format:str):
+            if not value: return ''
+            f = "%Y-%m-%d" if format == "ymd" else "%Y-%m-%d %H:%M"
+            return datetime.strptime(value, f).strftime(f)
 
         def to_bool(value):
             return True if value == "1" else False
@@ -83,7 +81,7 @@ class Document():
             ordinance_code=body["ordinanceCode"],
             form_code=body["formCode"],
             doc_type_code=body["docTypeCode"],
-            period_start=to_date(body["periodStart"], "ymd"),
+            period_start=to_date(body.get("periodStart",""), "ymd"),
             period_end=to_date(body["periodEnd"], "ymd"),
             submitted_date=to_date(body["submitDateTime"], "ymd_hm"),
             title=body["docDescription"],

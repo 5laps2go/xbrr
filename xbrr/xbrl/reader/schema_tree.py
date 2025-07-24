@@ -1,14 +1,12 @@
 import os
 from urllib.parse import urljoin
+from bs4 import BeautifulSoup, Tag
 
-from bs4 import BeautifulSoup
-
+from xbrr.base.reader.base_reader import BaseReader
 
 class SchemaTree():
-    def __init__(self, reader, base_xsd:str):
+    def __init__(self, reader:BaseReader, base_xsd:str):
         self.reader = reader
-        if base_xsd is None:  # for test_doc.py which has not base xsd
-            return
         self.base_xsduri = os.path.basename(base_xsd)
         base_namespace = self.get_targetNamespace(self.base_xsduri)
         self.namespace_uri = {}
@@ -17,11 +15,12 @@ class SchemaTree():
         self.linkbaseRefs = []
         self.read_import_tree(base_namespace, self.base_xsduri)
 
-    def get_targetNamespace(self, xsduri:str) -> str:
+    def get_targetNamespace(self, xsduri:str):
         xsd_xml = self.reader.read_uri(xsduri)
-        schema = xsd_xml.find('schema')
-        if schema is not None:
-            return schema['targetNamespace']
+        schema = xsd_xml.select_one('schema')
+        if schema is None:
+            return ''
+        return str(schema['targetNamespace'])
 
     def read_import_tree(self, xsd_ns:str, xsduri:str):
         def get_absxsduri(docuri, xsduri):
@@ -31,14 +30,15 @@ class SchemaTree():
 
         xsd_xml = self.reader.read_uri(xsduri)
         for ref in xsd_xml.find_all(['import','link:linkbaseRef']):
+            if not isinstance(ref, Tag): continue
             if ref.name=='import':
-                ref_ns = ref['namespace']
-                ref_xsduri = urljoin(xsduri, ref['schemaLocation'])
+                ref_ns = str(ref['namespace'])
+                ref_xsduri = urljoin(xsduri, str(ref['schemaLocation']))
                 self.namespace_uri[ref_ns] = ref_xsduri
                 self.read_import_tree(ref_ns, ref_xsduri)
             else: # link:linkbaseRef
                 # ex.: <link:linkbaseRef xlink:type="simple" xlink:href="jpcrp030000-asr-001_E00436-000_2018-03-31_01_2018-06-26_pre.xml" xlink:role="http://www.xbrl.org/2003/role/presentationLinkbaseRef" xlink:arcrole="http://www.w3.org/1999/xlink/properties/linkbase" />
-                linkrole_uri = ref.get('xlink:role')
+                linkrole_uri = str(ref.get('xlink:role'))
                 linkrole = linkrole_uri.split('/')[-1] if linkrole_uri is not None else ''
                 linkbaseRef = (get_absxsduri(xsduri, ref['xlink:href']), linkrole)
                 self.namespace_linkbaseRef[xsd_ns].append(linkbaseRef)
