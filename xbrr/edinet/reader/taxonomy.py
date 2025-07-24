@@ -56,7 +56,7 @@ class Taxonomy(BaseTaxonomy):
     def provision(self, version:str):
         self.__download(version, self.TAXONOMIES)
 
-    def is_defined(self, uri:str):
+    def is_defined(self, uri:str) -> bool:
         return uri.startswith(self.prefix)
     
     def implicit_xsd(self, namespace:str) -> str:
@@ -72,7 +72,9 @@ class Taxonomy(BaseTaxonomy):
             for pre in self.prefix:
                 if uri.startswith(pre):
                     return os.path.join(self.expand_dir, uri.replace(pre, ""))
-        return os.path.join(self.expand_dir, uri.replace(self.prefix, ""))
+        for pre in self.prefix:
+            uri = uri.replace(pre, "")
+        return os.path.join(self.expand_dir, uri)
 
     def __download(self, key:str, taxonomies:dict[str,str]):
         marker_dir = os.path.join(os.path.join(self.root, "taxonomy"), key)

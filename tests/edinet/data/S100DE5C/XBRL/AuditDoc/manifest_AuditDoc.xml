@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://disclosure.edinet-fsa.go.jp/2013/manifest" xmlns:jpcrp_cor="http://disclosure.edinet-fsa.go.jp/taxonomy/jpcrp/2018-02-28/jpcrp_cor">
+<tocComposition>
+<title xml:lang="ja">監査報告書</title>
+<title xml:lang="en">Audit Document</title>
+<item in="presentation" ref="jpaud" extrole="http://disclosure.edinet-fsa.go.jp/role/jpcrp/rol_IndependentAuditorsReport">
+<insert parent="jpcrp_cor:IndependentAuditorsReportHeading">
+<item ref="jpaud_1" extrole="http://disclosure.edinet-fsa.go.jp/role/jpcrp/rol_IndependentAuditorsReport" start="jpcrp_cor:IndependentAuditorsReportHeading" in="presentation" />
+</insert>
+</item>
+</tocComposition>
+<list>
+<instance id="jpaud" type="AuditDoc" preferredFilename="jpaud-aai-cc-001_E05739-000_2018-03-31_01_2018-06-27.xbrl">
+<ixbrl>jpaud-aai-cc-001_E05739-000_2018-03-31_01_2018-06-27_ixbrl.htm</ixbrl>
+</instance>
+<instance id="jpaud_1" type="AuditDoc" preferredFilename="jpaud-aar-cn-001_E05739-000_2018-03-31_01_2018-06-27.xbrl">
+<ixbrl>jpaud-aar-cn-001_E05739-000_2018-03-31_01_2018-06-27_ixbrl.htm</ixbrl>
+</instance>
+</list>
+</manifest>

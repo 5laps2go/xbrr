@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 
 from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
+from bs4.element import NavigableString, Tag, PageElement
 
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 
@@ -65,7 +65,7 @@ class Doc(XbrlDoc):
         return path
 
     @property
-    def default_linkbase(self) -> dict:
+    def default_linkbase(self) -> dict[str, str]:
         if 'public' == self.xbrl_kind:
             return {
                 'doc': 'pre', # document kind for the order of financial statements
@@ -84,14 +84,15 @@ class Doc(XbrlDoc):
                 'roleRef': 'roleRef',
                 'arc_role': 'domain-member'
             }
-        if '/tdnet-' in self.file_spec: # old type of taxonomy before 2014
-            return {
-                'doc': 'pre', # document kind for the order of financial statements
-                'link_node': 'presentationLink',
-                'arc_node': 'presentationArc',
-                'roleRef': 'roleRef',
-                'arc_role': 'parent-child'
-            }
+
+        assert '/tdnet-' in self.file_spec # old type of taxonomy before 2014
+        return {
+            'doc': 'pre', # document kind for the order of financial statements
+            'link_node': 'presentationLink',
+            'arc_node': 'presentationArc',
+            'roleRef': 'roleRef',
+            'arc_role': 'parent-child'
+        }
 
     @property
     def published_date(self) -> tuple[datetime, str]:
@@ -199,8 +200,11 @@ class Doc(XbrlDoc):
             infile = manifest_file
             with open(manifest_file, encoding="utf-8-sig") as f:
                 manifest_xml = BeautifulSoup(f, "lxml-xml")
+            instance_tag = manifest_xml.select_one('instance')
+            if not instance_tag:
+                return self.file_spec + ".xbrl"
             xbrl_file = os.path.join(os.path.dirname(self.file_spec),
-                                    manifest_xml.find('instance')['preferredFilename'])
+                                     str(instance_tag['preferredFilename']))
         else:
             infile = self.file_spec+"-ixbrl.htm"
             xbrl_file = self.file_spec + ".xbrl"
@@ -220,7 +224,7 @@ class Doc(XbrlDoc):
                 copy.append(clone(child))
             return copy        
         def xlate_to_xbrl(element, xbrl_xml, separator, outbs):
-            scale_hist = {}
+            scale_hist:dict[int,int] = {}
             def __new_ixvalue(name, prefix, attrs, value):
                 xbrli = outbs.new_tag(name, namespace=nsdecls['xmlns:'+prefix], nsprefix=prefix, **attrs)
                 xbrli.string = value
@@ -243,7 +247,7 @@ class Doc(XbrlDoc):
                     if not isinstance(elem, Tag): continue
                     if elem.prefix == 'ix':
                         if elem.name in ['nonNumeric']:
-                            prefix,name = tuple(elem["name"].split(':'))
+                            prefix,name = tuple(str(elem["name"]).split(':'))
                             attrs = {k:v for k,v in elem.attrs.items() 
                                     if k in ['contextRef','decimals','unitRef','xsi:nil']}
                             __xlate_to_xbrl(elem)
@@ -252,17 +256,17 @@ class Doc(XbrlDoc):
                             __replace_nonXXX_on_src(elem)
                             continue
                         elif elem.name in ['nonFraction', 'nonfraction']:
-                            prefix,name = tuple(elem["name"].split(':'))
+                            prefix,name = tuple(str(elem["name"]).split(':'))
                             value = elem.text
                             attrs = {k:v for k,v in elem.attrs.items() 
                                     if k in ['contextRef','decimals','unitRef','xsi:nil']}
                             if "scale" in elem.attrs and elem.attrs.get("format",'ixt:numdotdecimal')=='ixt:numdotdecimal': # no format case:3276:2014-02-10
-                                scale = int(elem.attrs["scale"])
-                                decimals = int(elem.attrs["decimals"])
+                                scale = int(str(elem.attrs["scale"]))
+                                decimals = int(str(elem.attrs["decimals"]))
                                 if elem.get('unitRef') in ['JPY','USD']:
                                     scale_hist[scale] = scale_hist.get(scale,0) + 1
                                     if len(scale_hist) > 1: # scale bug 6578:2019-07-11
-                                        scale = max(scale_hist, key=scale_hist.get)
+                                        scale = max(scale_hist, key=scale_hist.get) # type: ignore
                                         decimals = -scale
                                 try:
                                     # temporary fix for bad ix format
@@ -297,6 +301,7 @@ class Doc(XbrlDoc):
             ixbrl_html = ixbrl.find("html")
             xbrl_xml = outbs.find('xbrli:xbrl')
             if not xbrl_xml:
+                assert isinstance(ixbrl_html, Tag)
                 nsdecls = {k:v for k,v in ixbrl_html.attrs.items() if ':' in k and k!='xmlns:ix'}
                 xbrl_xml = outbs.new_tag('xbrli:xbrl', **nsdecls)
                 outbs.append(xbrl_xml)
@@ -310,9 +315,11 @@ class Doc(XbrlDoc):
             infile = manifest_file
             with open(manifest_file, encoding="utf-8-sig") as f:
                 manifest_xml = BeautifulSoup(f, "lxml-xml")
-            for ixbrl in manifest_xml.find('instance').children:
-                if ixbrl.name=="ixbrl":
-                    infile = os.path.join(os.path.dirname(self.file_spec), ixbrl.string)
+            instance_tag = manifest_xml.find('instance')
+            assert isinstance(instance_tag, Tag)
+            for ixbrl in instance_tag.children:
+                if isinstance(ixbrl, Tag) and ixbrl.name=="ixbrl":
+                    infile = os.path.join(os.path.dirname(self.file_spec), str(ixbrl.string))
                     translate_ixbrl(infile, xbrlbs)
         else:
             infile = self.file_spec+"-ixbrl.htm"

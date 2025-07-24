@@ -11,7 +11,7 @@ class TestDocumentClient(unittest.TestCase):
     def test_get(self):
         _dir = os.path.dirname(__file__)
         client = DocumentClient()
-        file_path = client.get("S100PWDV", response_type=1, save_dir=_dir)
+        file_path = client.get("S100PWDV", response_type="1", save_dir=_dir)
         self.assertTrue(os.path.exists(file_path))
         os.remove(file_path)
 
@@ -49,7 +49,7 @@ class TestDocumentClient(unittest.TestCase):
         client = DocumentClient()
         # lang="en" does not exist?
         file_path = client.get_xbrl("S100FGSC", save_dir=_dir,
-                                    expand_level=None)
+                                    expand_level="")
         self.assertTrue(os.path.exists(file_path))
         self.assertTrue(str(file_path).endswith(".zip"))
         os.remove(file_path)

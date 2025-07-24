@@ -17,17 +17,13 @@ class Information(BaseParser):
     def number_of_directors(self):
         value = self.get_value("directors")
         numbers, ground = self._extract_number_of_directors()
-        value.value = numbers["total"]
-        value.ground = ground
-        return value
+        return numbers["total"]
 
     @property
     def number_of_female_executives(self):
         value = self.get_value("directors")
         numbers, ground = self._extract_number_of_directors()
-        value.value = numbers["female"]
-        value.ground = ground
-        return value
+        return numbers["female"]
 
     def _extract_number_of_directors(self):
         text = self.search("directors", "^(男性).+(名).+(女性).+(名)")

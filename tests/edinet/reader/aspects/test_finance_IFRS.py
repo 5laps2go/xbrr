@@ -1,10 +1,9 @@
 import os
 import shutil
 import unittest
-from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.xbrl.reader.reader import Reader
+from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.edinet.reader.doc import Doc
-import tests.edinet.reader.doc as testdoc
 from xbrr.edinet.reader.aspects.finance import Finance
 
 
@@ -33,7 +32,7 @@ class TestFinance(unittest.TestCase):
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information
-        self.assertIsNone(feature.value)
+        self.assertIsNone(feature)
         # self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
         # self.assertEqual(feature.label, "セグメント情報等")
         # self.assertEqual(feature.context, "CurrentYearDuration")

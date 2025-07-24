@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
@@ -11,9 +12,9 @@ class BaseDoc():
     Submitted Document base class
     """
 
-    def __init__(self, package, root_dir="", xbrl_file=""):
+    def __init__(self, package, root_dir:str|Path="", xbrl_file=""):
         self.package = package
-        self.root_dir = root_dir
+        self.root_dir = str(root_dir)
         self.xbrl_file = xbrl_file
     
     def find_path(self, kind: str) -> str:
@@ -26,6 +27,10 @@ class BaseDoc():
     def published_date(self) -> tuple[datetime, str]:
         raise NotImplementedError("You have to implement published_date.")
     
+    @property
+    def fiscal_year_date(self) -> datetime:
+        raise NotImplementedError("You have to implement fiscal_year_date.")
+
     @property
     def company_code(self) -> str:
         raise NotImplementedError("You have to implement company_code.")

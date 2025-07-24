@@ -1,17 +1,19 @@
+from __future__ import annotations
+from typing import Optional, Literal, Callable, cast
+
 import importlib.util
 import os
 import itertools
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Set, Literal
 from enum import Enum, auto
 from urllib.parse import urljoin
 from logging import getLogger
 
-from bs4 import BeautifulSoup
-
-if importlib.util.find_spec("pandas") is not None:
-    import pandas as pd
+from bs4 import BeautifulSoup, Tag
+from numpy import isin
+import pandas as pd
+from pandas import DataFrame
 
 from xbrr.base.reader.base_reader import BaseReader
 from xbrr.base.reader.xbrl_doc import XbrlDoc
@@ -19,24 +21,24 @@ from xbrr.xbrl.reader.element_schema import ElementSchema
 from xbrr.xbrl.reader.element_value import ElementValue
 from xbrr.xbrl.reader.role_schema import RoleSchema
 from xbrr.xbrl.reader.schema_tree import SchemaTree
+from xbrr.xbrl.reader.schema_dicts import SchemaDicts
 from xbrr.xbrl.reader.taxonomy_repository import TaxonomyRepository
 
 
 class Reader(BaseReader):
 
-    def __init__(self, xbrl_doc: XbrlDoc, taxonomy_repo=None, save_dir: str = ""):
-        super().__init__("edinet")
-        self.xbrl_doc = xbrl_doc
+    def __init__(self, xbrl_doc: XbrlDoc, taxonomy_repo:TaxonomyRepository|None=None, save_dir: str = ""):
+        super().__init__("edinet", xbrl_doc)
         self.taxonomy_repo = taxonomy_repo if taxonomy_repo is not None\
             else TaxonomyRepository(save_dir)
         self.save_dir = save_dir
 
-        self.schema_tree = None
         self._role_dic = {}
         self._context_dic = {}
-        self._value_dic = {}
-        self._namespace_dic = {}
-        self.schema_dic = None
+        self._value_dic:dict[str, list[ElementValue]] = {}
+        self._namespace_dic:dict[str, str] = {}
+        self.schema_dic:SchemaDicts
+        self.schema_tree:SchemaTree
 
         self.logger = getLogger(__name__)
         self.debug_print = []
@@ -54,18 +56,21 @@ class Reader(BaseReader):
         self.schema_tree = SchemaTree(self, self.xbrl_doc.find_path('xsd'))
     
     @property
-    def custom_roles(self):
+    def custom_roles(self) -> dict[str,RoleSchema]:
         if len(self._role_dic) == 0:
             linkbase = self.xbrl_doc.default_linkbase
             xml = self.read_uri(self.schema_tree.find_kind_uri(linkbase['doc']))
             link_node, roleRef = self.get_linkbase_tag(xml, linkbase['link_node'], linkbase['roleRef'])
-            self._role_dic.update(RoleSchema.read_role_ref(self, xml, link_node, roleRef))
+            self._role_dic.update(RoleSchema.read_role_ref(xml, link_node, roleRef, lambda uri: self.read_uri(uri)))
         return self._role_dic
 
     @property
-    def namespaces(self):
+    def namespaces(self) -> dict[str, str]:
         return self._namespace_dic
 
+    def presentation_version(self) -> str:
+        return self.schema_tree.presentation_version()
+    
     def get_schema_by_link(self, link:str) -> ElementSchema:
         assert "#" in link                  # http://disclosure.edinet-fsa.go.jp/taxonomy/jppfs/2020-11-01/jppfs_rt_2020-11-01.xsd#rol_ConsolidatedLabel
         ns_or_xsduri = link.split("#")[0]   # http://...(edinet|tdnet).../...
@@ -99,10 +104,10 @@ class Reader(BaseReader):
             uri = os.path.join(self.xbrl_doc.dirname, uri)
         return self.taxonomy_repo.read_uri(uri)
     
-    def get_linkbase_tag(self, doc:BeautifulSoup, *args):
+    def get_linkbase_tag(self, doc:BeautifulSoup, *args) -> tuple[str,str]:
         ns_prefixes = {v: k for k,v in doc._namespaces.items()}
         if (link_prefix:=ns_prefixes.get("http://www.xbrl.org/2003/linkbase")) is not None:
-            return ("{}:{}".format(link_prefix, arg) for arg in args)
+            return cast(tuple[str,str], ("{}:{}".format(link_prefix, arg) for arg in args))
         return args
     
     def get_label_uri(self, xsduri:str) -> str:
@@ -110,11 +115,11 @@ class Reader(BaseReader):
         laburi = self.schema_tree.find_kind_uri('lab', xsduri)
         return laburi
 
-    def read_schema_by_role(self, role_name, preserve_cal:Dict, fix_cal_node:List):
+    def read_schema_by_role(self, role_name, preserve_cal:dict={}, fix_cal_node:list[str]=[]):
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
-        nodes = {}
+        nodes:dict[str, Node] = {}
         linkbase = self.xbrl_doc.default_linkbase
         self.logger.debug("-------------- Section presentation -----------------")
         for docuri in self.schema_tree.linkbaseRef_iterator(linkbase['doc']):
@@ -131,9 +136,9 @@ class Reader(BaseReader):
                 self.patch_calc_node_tree(context_vdic, nodes, preserve_cal, fix_cal_node)
         return self.flatten_to_schemas(nodes)
     
-    def context_value_dic(self, role_name, nodes):
+    def context_value_dic(self, role_name:str, nodes:dict[str, Node]) -> dict[str,ElementValue]:
         def most_used_current_context(nodes):
-            counter = {}
+            counter:dict[str,int] = {}
             for name in [n for n in nodes if n in self._value_dic and self._value_dic[n][0].data_type=='monetary']:
                 for context in [x.context_ref['id'] for x in self._value_dic.get(name,[])]:
                     count = counter.get(context,0)
@@ -142,17 +147,17 @@ class Reader(BaseReader):
                 consolidated_counter = dict(filter(lambda x: not re.search('NonConsolidated', x[0]), counter.items()))
                 if consolidated_counter: counter = consolidated_counter
             not_prior_counter = dict(filter(lambda x: not x[0].startswith('Prior'), counter.items()))
-            context = max(not_prior_counter, key=not_prior_counter.get) if not_prior_counter else max(counter, key=counter.get) if counter else ''
+            context = max(not_prior_counter, key=not_prior_counter.get) if not_prior_counter else max(counter, key=counter.get) if counter else '' # type: ignore
             return context
         def select_context(vlist, context):
             list = [x for x in vlist if x.context_ref.get('id','')==context and x.value!='NaN' and x.unit!=''] # isTextBlock: x.unit!=''
             return list[0] if list else None
         context = most_used_current_context(nodes)
-        context_value_dic = {k:select_context(v,context) for k,v in self._value_dic.items() if k in nodes and select_context(v,context)}
+        context_value_dic = {k:vv for k,v in self._value_dic.items() if k in nodes and (vv:=select_context(v,context))}
         self.prepare_epsilon(context_value_dic)
         return context_value_dic
 
-    def prepare_epsilon(self, context_vdic):
+    def prepare_epsilon(self, context_vdic:dict[str,ElementValue]):
         moneys = [x for x in context_vdic.values() if x.data_type=='monetary']
         if not moneys:
             Node.epsilon_value = 0
@@ -164,20 +169,20 @@ class Reader(BaseReader):
         # assert eps1 == eps2
         Node.epsilon_value = eps1
     
-    def restructure_presentation(self, nodes, context_vdic):
+    def restructure_presentation(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
         self.clean_deleted_presentation(nodes)
         self.mark_subtotal_as_parent(nodes, context_vdic)
 
-    def clean_deleted_presentation(self, nodes):
+    def clean_deleted_presentation(self, nodes:dict[str,Node]):
         for name,node in nodes.items():
             if node.is_deleted_parent_link_only():
                 node.remove_children()
     
-    def clean_deleted_calculation(self, nodes):
+    def clean_deleted_calculation(self, nodes:dict[str,Node]):
         for name,node in nodes.items():
             node.omit_deleted_derives()
 
-    def mark_subtotal_as_parent(self, nodes, context_vdic):
+    def mark_subtotal_as_parent(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
         parent_children = {}
         for node in nodes.values():
             if node.parent_name is None: continue
@@ -187,14 +192,14 @@ class Reader(BaseReader):
             if len(parent_children[name]) >= 1:
                 nodes[name].mark_subtotal(parent_children[name], context_vdic)
 
-    def patch_calc_node_tree(self, context_value_dic, nodes, preserve_cal:Dict, fix_cal_node):
+    def patch_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], preserve_cal:dict, fix_cal_node:list[str]):
         self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
 
         if self.validate_calc_node_tree(context_value_dic, nodes, preserve_cal.keys()):
             return
         
         # preserve_parents = set(sum(preserve_cal.values(),[]))
-        # self.fix_not_preserve_link('cal', nodes, preserve_cal, preserve_parents)
+        # self.fix_not_preserve_link('cal', nodes, preserve_cal)
         self.clean_deleted_calculation(nodes)
         
         self.fix_calc_link_for_parent_subtotal(nodes, context_value_dic)
@@ -202,7 +207,7 @@ class Reader(BaseReader):
         self.fix_extra_calc_link(nodes, fix_cal_node, context_value_dic)
         self.fix_missing_calc_link(nodes, fix_cal_node, context_value_dic)
 
-    def validate_calc_node_tree(self, context_value_dic, nodes, cal_keys):
+    def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], cal_keys) -> bool:
         has_derived = False
         leaf_nodes = []
         for name in nodes:
@@ -222,7 +227,7 @@ class Reader(BaseReader):
                     return False
         return has_derived
 
-    def make_node_tree(self, nodes, role_name, docuri, link_node, arc_node, arc_role):
+    def make_node_tree(self, nodes:dict[str,Node], role_name:str, docuri:str, link_node:str, arc_node:str, arc_role:str):
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]
         def get_absxsduri(docuri, xsduri):
@@ -235,12 +240,15 @@ class Reader(BaseReader):
         
         locs = {}
         for loc in doc.find_all("loc"):
+            if not isinstance(loc, Tag): continue
             locs[loc["xlink:label"]] = loc
 
         for role in doc.find_all(link_node, {"xlink:role": self.get_role(role_name).uri}):
+            if not isinstance(role, Tag): continue
             for i, arc in enumerate(role.find_all(arc_node, recursive=False)):
-                assert arc["xlink:arcrole"].split('/')[-1] in ['parent-child','summation-item','domain-member', 'dimension-domain', 'all', 'hypercube-dimension']
-                if not arc["xlink:arcrole"].endswith(arc_role):
+                if not isinstance(arc, Tag): continue
+                assert str(arc["xlink:arcrole"]).split('/')[-1] in ['parent-child','summation-item','domain-member', 'dimension-domain', 'all', 'hypercube-dimension']
+                if not str(arc["xlink:arcrole"]).endswith(arc_role):
                     continue
 
                 arctype = arc_node.split(':')[-1]
@@ -258,13 +266,13 @@ class Reader(BaseReader):
                     nodes[get_name(parent)] = Node(p)
 
                 if arctype == "calculationArc":
-                    self.logger.debug("{}:{} --> {}:w{} p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight",0),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
-                    nodes[get_name(child)].add_derive(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'), arc['weight'])
+                    self.logger.debug("{}:{} --> {}:w{} p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("weight","0"),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
+                    nodes[get_name(child)].add_derive(nodes[get_name(parent)], str(arc.get('use','')), str(arc.get('priority','0')), str(arc.get('order','0')), str(arc['weight']))
                 else:
                     self.logger.debug("{}:{} --> {}:p{} o{} {}".format(nodes[get_name(parent)].label,get_name(parent),get_name(child),arc.get("priority","0"),arc.get("order","0"),arc.get("use",'')))
-                    nodes[get_name(child)].add_parent(nodes[get_name(parent)], arc.get('use',''), arc.get('priority','0'), arc.get('order','0'))
+                    nodes[get_name(child)].add_parent(nodes[get_name(parent)], str(arc.get('use','')), str(arc.get('priority','0')), str(arc.get('order','0')))
 
-    def fix_not_preserve_link(self, type, nodes, preserve_dict, preserve_parents):
+    def fix_not_preserve_link(self, type:Literal['cal','pre'], nodes:dict[str,Node], preserve_dict:dict):
         for name in nodes:
             if t(name) in preserve_dict:
                 nparents = []
@@ -285,7 +293,7 @@ class Reader(BaseReader):
                 if type=='cal':
                     nodes[name].omit_deleted_derives()
 
-    def fix_missing_calc_link(self, nodes, fix_cal_node, context_vdic):
+    def fix_missing_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], context_vdic:dict[str,ElementValue]):
         def make_missing_link(derived, orphans):
             if derived is None or not orphans:
                 return
@@ -328,7 +336,7 @@ class Reader(BaseReader):
                 orphans = ordered_candidates[ordered_candidates.index(derived)+1:]
                 make_missing_link(derived, orphans)
     
-    def fix_extra_calc_link(self, nodes, fix_cal_node, context_vdic):
+    def fix_extra_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], context_vdic:dict[str,ElementValue]):
         def eliminate_extra_link(node):
             derives = sorted([v for v in node.get_derived() if v.name in context_vdic], reverse=True, key=lambda x: x.derivation_order)
             node_value, diff, epsilon = node.cvalue(context_vdic)
@@ -357,7 +365,7 @@ class Reader(BaseReader):
         for node in sorted(cal_nodes, reverse=True, key=lambda x: x.derivation_order):
             eliminate_extra_link(node)
 
-    def fix_calc_link_for_parent_subtotal(self, nodes, context_vdic):
+    def fix_calc_link_for_parent_subtotal(self, nodes:dict[str, Node], context_vdic:dict[str,ElementValue]):
         def test_lineitems(name, children):
             for parent_name in [name] + [x.parent_name for x in children]:
                 if any([parent_name.endswith(x) for x in ['StatementOfIncomeLineItems', 'StatementsOfIncomeAbstract', 'ProfitLossFromContinuingOperationsIFRS']]): # StatementsOfIncomeAbstract:7971:2014-02-07, ProfitLossFromContinuingOperationsIFRS:6191:2021-11-12
@@ -381,7 +389,7 @@ class Reader(BaseReader):
                     child.add_derive(nodes[parent_name], '', '0', '1', str(1))
                 continue
 
-    def subtotal_children(self, nodes, context_vdic):
+    def subtotal_children(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]) -> dict[str,list[Node]]:
         _parent_children, parent_children = {}, {}
         for node in nodes.values():
             if node.parent_name is None: continue
@@ -406,7 +414,7 @@ class Reader(BaseReader):
                     parent_children[nodes[name].parent_name].insert(idx, subtotal)
         return subtotal_children
 
-    def eliminate_non_value_calc_leaf(self, nodes, context_vdic):
+    def eliminate_non_value_calc_leaf(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
         def no_current_value(name):
             return context_vdic.get(name, 'NaN')=='NaN'  # 2813:2013-05-13 all([x.context_ref['id'].startswith('Prior') or x.value=='NaN'
         # nodes preserves child, parent order (derived, derives order)
@@ -418,7 +426,7 @@ class Reader(BaseReader):
                 n.remove_derive_all()
                 n = derive
     
-    def flatten_to_schemas(self, nodes):
+    def flatten_to_schemas(self, nodes:dict[str,Node]) -> DataFrame:
         schemas = []
         Node.init_derive_path()
 
@@ -462,7 +470,7 @@ class Reader(BaseReader):
         return schemas
 
 
-    def read_value_by_role(self, role_link:str, preserve_cal:Dict = {}, fix_cal_node:List = [], scope:str = ""):
+    def read_value_by_role(self, role_link:str, preserve_cal:dict = {}, fix_cal_node:list = [], scope:str = "") -> DataFrame:
         """Read XBRL values in a dataframe which are specified by role and/or context.
 
         Arguments:
@@ -498,7 +506,7 @@ class Reader(BaseReader):
 
         schemas = self.read_schema_by_role(role_link, preserve_cal, fix_cal_node)
         if len(schemas) == 0:
-            return None
+            return pd.DataFrame()
 
         xbrl_data = []
         for i, row in schemas.iterrows():
@@ -552,22 +560,27 @@ class Reader(BaseReader):
         shrink_depth = [conv(d, depthsign) for d in shrink]
         return pd.Series(shrink_depth, index=shrink.index)
 
-    def find_value_names(self, candidates:List[str]) -> List[str]:
+    def find_value_names(self, candidates:list[str]) -> list[str]:
         values = []
         for name in candidates:
             values += [x for x in self._value_dic.keys() if name in x]
         return values
     
-    def find_value_name(self, findop) -> str:
-        return next(filter(findop, self._value_dic.keys()), None)
+    def find_value_name(self, findop:Callable[[str], bool]) -> str:
+        return next(filter(findop, self._value_dic.keys()), '') # '' as Not Found
 
-    def findv(self, tag):
-        id = tag.replace(':', '_')
+    def findv(self, name) -> Optional[ElementValue]:
+        id = name.replace(':', '_')
         return self._value_dic.get(id, [None])[0] # find returns the first element value only.
 
 
 class Node():
     epsilon_value = 0
+
+    @classmethod
+    def init_derive_path(cls):
+        Node.children_list = {}
+        Node.base_node = Node(ElementSchema())
 
     class Marker(Enum):
         subtotal = auto()
@@ -575,7 +588,7 @@ class Node():
         subtotal_with_extra_children = auto()
         normal_node = auto()
 
-    def __init__(self, element, order=0):
+    def __init__(self, element:ElementSchema):
         self.element = element
         self.plinks = DirectedLinks("plink")
         self.clinks = DirectedLinks("clink")
@@ -592,10 +605,10 @@ class Node():
             self.debug_print = 'more than two parents found at {}: {}'.format(self.name, [l.l_from.name for l in plinks])
         return plinks[0].order if plinks else 0
     
-    def add_parent(self, parent, use:str, priority:str, order:str ):
+    def add_parent(self, parent:Node, use:str, priority:str, order:str ):
         self.add_node(self.plinks, parent, use, float(priority), float(order))
 
-    def remove_parent(self, parent):
+    def remove_parent(self, parent:Node):
         self.remove_link(self.plinks.src, parent)
     
     def remove_children(self):
@@ -605,27 +618,27 @@ class Node():
         return self.plinks.src and len(self.plinks.active_src)==0
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self.element.name
 
     @property
-    def label(self):
+    def label(self) -> str:
         return self.element.label
 
     @property
-    def reference(self):
+    def reference(self) -> str:
         return self.element.reference
 
     @property
-    def is_leaf(self):
+    def is_leaf(self) -> bool:
         return len(self.plinks.active_dst) == 0
     
     @property
-    def depth(self):
+    def depth(self) -> int:
         return len(self.get_ascendants())
 
     @property
-    def derivation_order(self):
+    def derivation_order(self) -> tuple[float, ...]:
         try:
             return self.__derivation_order
         except AttributeError:
@@ -638,14 +651,14 @@ class Node():
             return self.__derivation_order
 
     @property
-    def parent_name(self):
+    def parent_name(self) -> Optional[str]:
         parents = self.get_parent()
         return parents[0].name if parents else None
     
-    def get_parent(self):
+    def get_parent(self) -> list[Node]:
         return self.plinks.active_src_nodes()
 
-    def get_ascendants(self):
+    def get_ascendants(self) -> list[Node]:
         parents = []
         ps = self.get_parent()
         while len(ps) != 0 and ps[0] not in parents:
@@ -653,17 +666,17 @@ class Node():
             ps = ps[0].get_parent()
         return parents
     
-    def links(self, links):
+    def links(self, links:DirectedLinks) -> DirectedLinks:
         return self.plinks if links.type=='plink' else self.clinks
     
-    def get_prev_sibling(self, links):
+    def get_prev_sibling(self, links) -> Optional[Node]:
         srcs = links.active_src_nodes()
         if not srcs: return None
         siblings = srcs[0].links(links).active_dst_nodes(order=True)
         index = siblings.index(self)
         return siblings[index-1] if index>0 else None
 
-    def get_next_leaf(self):
+    def get_next_leaf(self) -> Optional[Node]:
         plink = next(iter(self.plinks.active_src), None)
         if plink:
             links = [l for l in plink.l_from.plinks.dst if l.order > plink.order]
@@ -674,7 +687,7 @@ class Node():
                 return plink.l_from.get_next_leaf()
         return None
 
-    def get_first_leaf(self):
+    def get_first_leaf(self) -> Node:
         if self.is_leaf:
             return self
         clink = min(self.plinks.active_dst, key=lambda l: l.order)
@@ -692,10 +705,10 @@ class Node():
 
         self._add_derive(target, use, priority, order, weight)
 
-    def _add_derive(self, target, use:str, priority:str, order:str, weight:str):
+    def _add_derive(self, target:Node, use:str, priority:str, order:str, weight:str):
         self.add_node(self.clinks, target, use, float(priority), float(order), float(weight))
 
-    def add_node(self, dlinks, target, use:str, priority:float, order:float, weight:float=-1):
+    def add_node(self, dlinks:DirectedLinks, target:Node, use:str, priority:float, order:float, weight:float=-1):
         active_src = [l for l in dlinks.src if l.is_link(target, self, order)]
         if not active_src:
             link = Link(target, self, order, use, priority, weight)
@@ -704,50 +717,45 @@ class Node():
         else:
             active_src[0].set_properties(use, priority, weight)
 
-    def add_link_dst(self, dlinks, link):
+    def add_link_dst(self, dlinks:DirectedLinks, link:Link):
         if dlinks.type == 'clink':
             self.clinks.dst.append(link)
         elif dlinks.type == 'plink':
             self.plinks.dst.append(link)
 
-    def remove_link(self, src_links:List, target):
+    def remove_link(self, src_links:list[Link], target:Node):
         for l in [l for l in src_links if l.is_link(target, self)]:
             l.delete()
 
-    def remove_link_all(self, links:List):
+    def remove_link_all(self, links:list[Link]):
         for l in [l for l in links if l.is_active()]:
             l.delete()
 
-    def can_add_derive(self, target):
+    def can_add_derive(self, target:Node) -> bool:
         if self.is_subtotal():
             return True
         if target.derivation_order < self.derivation_order:
             return False
         return True
 
-    def is_subtotal_and_derived_children(self, target):
+    def is_subtotal_and_derived_children(self, target:Node) -> bool:
         parents = target.get_parent()
         if self.is_subtotal() and parents and parents[0]==self:
             return True
         return False
     
     def remove_subtotal(self):
-        if self.parents:
-            self.parents[0]['priority'] == 0
-            try:
-                del self._Node__derivation_order
-            except AttributeError:
-                pass
+        self.marker = Node.Marker.normal_node
     
     def remove_derive_all(self):
         for l in self.clinks.src:
             l.delete()
     
-    def remove_derive(self, target):
+    def remove_derive(self, target:Node):
         for l in [l for l in self.clinks.src if l.is_link(target, self)]:
             l.delete()
     
-    def remove_derive_all_children(self, nodes):
+    def remove_derive_all_children(self, nodes:list[Node]):
         removed = self.clinks.active_dst_nodes()
         for x in removed:
             x.remove_derive(self)
@@ -765,19 +773,19 @@ class Node():
     def omit_deleted_derives(self):
         return
     
-    def cvalue(self, context_vdic):
+    def cvalue(self, context_vdic:dict[str,ElementValue]) -> tuple[float,float,int]:
         value = cvalue(self, context_vdic)
         to_target = self.clinks.active_dst_nodes()
-        calc_values = [v.get_weight(self) * cvalue(v, context_vdic) for v in to_target]
+        calc_values = [(val if (val:=v.get_weight(self)) else 1.0) * cvalue(v, context_vdic) for v in to_target]
         diff = sum(calc_values) - value
         epsilon = epsvalue(context_vdic.get(self.name,None), calc_values)
         return value, diff, epsilon
     
-    def validate(self, context_vdic):
+    def validate(self, context_vdic:dict[str, ElementValue]) -> bool:
         value, diff, epsilon = self.cvalue(context_vdic)
         return abs(diff) < epsilon
     
-    def validate_or_remove_derive_children(self, context_vdic):
+    def validate_or_remove_derive_children(self, context_vdic:dict[str, ElementValue]):
         removed = []
         for node in self.clinks.active_dst_nodes():
             value,diff,e = node.cvalue(context_vdic)
@@ -786,9 +794,9 @@ class Node():
                     removed.append(node)
         return removed
 
-    def compare_subtotal(self, children, context_vdic):
-        def f(v, target):
-            return v.get_weight(target) if v.get_weight(target) is not None else 1.0
+    def compare_subtotal(self, children:list[Node], context_vdic:dict[str, ElementValue]) -> int:
+        def f(v:Node, target:Node) -> float:
+            return val if (val:=v.get_weight(target)) else 1.0
         if context_vdic[self.name].unit not in ['JPY','USD']: # TODO: it must be len()!=3 or format!='numdotdecimals'
             return False
         result = cvalue(self, context_vdic)
@@ -800,66 +808,63 @@ class Node():
             return 1
         return -1
 
-    def get_derives(self):
-        return sorted([x for x in self.derives if x['use'] not in ['prohibited','deleted']], key=lambda x: x['use'])
-    
-    def get_derive(self):
+    def get_derive(self) -> Optional[Node]:
         derives = self.clinks.active_src_nodes()
         return derives[0] if derives else None
 
-    def get_derived(self):
+    def get_derived(self) -> list[Node]:
         return self.clinks.active_dst_nodes()
 
     def update_derive_count(self, diff:int):
         self.derived_count += diff
 
-    def get_derive_chain(self):
+    def get_derive_chain(self) -> list[Node]:
         return self._get_derive_chain([])
-    def _get_derive_chain(self, path0):
+    def _get_derive_chain(self, path0:list[Node]) -> list[Node]:
         path = path0 + [self]
         from_target = self.clinks.active_src_nodes()
-        active_chains = [[x, *x._get_derive_chain_(path)] for x
+        active_chains = [[x, *x._get_derive_chain(path)] for x
             in from_target if x not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
         if len(sorted_chains) > 1: print("!!! get_derive_chain:",sorted_chains)
         return sorted_chains[0] if len(sorted_chains) > 0 else []
 
-    def has_derive(self, target):
+    def has_derive(self, target:Node) -> list[Link]:
         derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
         return derive_links
 
-    def get_weight(self, target) -> float:
+    def get_weight(self, target:Node) -> Optional[float]:
         derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
         return derive_links[0].weight if len(derive_links)>0 else None
 
-    def minus_weight(self, target):
+    def minus_weight(self, target:Node):
         derive_links = [l for l in self.clinks.active_src if l.is_link(target, self)]
         if derive_links:
             link = derive_links[0]
             link.set_properties(link.use, link.priority, -1)
 
-    def has_derived(self):
+    def has_derived(self) -> bool:
         return len(self.clinks.active_dst) > 0
     
-    def no_derived(self):
+    def no_derived(self) -> bool:
         return len(self.clinks.active_dst) == 0
 
-    def no_derive(self):
+    def no_derive(self) -> bool:
         return len(self.clinks.active_src) == 0
 
-    def need_to_derive_value(self, context_vdic:Dict[str, ElementValue], fix_cal_node):
+    def need_to_derive_value(self, context_vdic:dict[str, ElementValue], fix_cal_node:list[str]):
         parents = self.get_parent()
         # omit quasi subtotal that subtotal is not fix_cal_node
         if self.is_subtotal_fewer_children() and not nmmatch(parents[0].name, fix_cal_node): # requires not nmmatch: 64180 日金銭　　　　　　　　　　　2014-02-12 15:30:00: 平成26年3月期 第3四半期決算短信
             return False
         return self.no_derive() and self.name in context_vdic
 
-    def has_derive_chain(self, preserve_parent_names):
+    def has_derive_chain(self, preserve_parent_names:list[str]) -> bool:
         if not self.get_derive_chain():
             return False
         return any([t(x.name) in preserve_parent_names for x in self.get_derive_chain()])
     
-    def mark_subtotal(self, children, context_vdic):
+    def mark_subtotal(self, children:list[Node], context_vdic:dict[str, ElementValue]):
         comparison = self.compare_subtotal(children, context_vdic)
         plinks = self.plinks.active_src         # TODO: it is not necessary
         if not plinks:
@@ -871,21 +876,19 @@ class Node():
         else:
             self.marker = Node.Marker.subtotal_with_fewer_children  # this is the subtotal but not enough children have
 
-    def is_subtotal_fewer_children(self):
+    def is_subtotal_fewer_children(self) -> bool:
         parents = self.get_parent()
         if parents and parents[0].is_subtotal_with_fewer_children():
             return True
         return False
     
-    def is_subtotal(self):
+    def is_subtotal(self) -> bool:
         return self.marker in [Node.Marker.subtotal]
 
-    def is_subtotal_with_fewer_children(self):
+    def is_subtotal_with_fewer_children(self) -> bool:
         return self.marker in [Node.Marker.subtotal_with_fewer_children]
 
-    children_list = {}
-    base_node = None
-    def get_child_index(self, child):
+    def get_child_index(self, child) -> str:
         children = Node.children_list.get(self, [])
         if child not in children:
             children.append(child)
@@ -893,9 +896,9 @@ class Node():
         child_index = children.index(child)
         return '123456789abcdefghijklmnopqrstuvwxyz'[child_index] if child_index < 35 else '0'
 
-    def get_derive_subpath(self):
+    def get_derive_subpath(self) -> list[tuple[str,Literal['1','-1']]]:
         return self._get_derive_subpath([])
-    def _get_derive_subpath(self, path0):
+    def _get_derive_subpath(self, path0) -> list[tuple[str,Literal['1','-1']]]:
         path = path0 + [self]
         if len(self.clinks.src)==0 and self.element.data_type in ['monetary','perShare']:
             return [(Node.base_node.get_child_index(self),'1')]
@@ -905,12 +908,7 @@ class Node():
         sorted_chains = sorted(active_chains, key=len, reverse=True)
         return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self),'1')]
 
-    @classmethod
-    def init_derive_path(cls):
-        Node.children_list = {}
-        Node.base_node = Node(None)
-
-    def get_derive_path(self):
+    def get_derive_path(self) -> str:
         def sum_sign(path):
             signs = [x[1].startswith('-') for x in path]
             pairs = [signs[i] and signs[i+1] for i in range(len(signs)-1)]
@@ -925,21 +923,21 @@ class DirectedLinks():
 
     def __init__(self, type:Literal["plink","clink"]):
         self.type = type
-        self.src = []
-        self.dst = []
+        self.src:list[Link] = []
+        self.dst:list[Link] = []
 
     @property
-    def active_src(self):
+    def active_src(self) -> list[Link]:
         return [l for l in self.src if l.is_active()]
 
-    def active_src_nodes(self):
+    def active_src_nodes(self) -> list[Node]:
         return [l.l_from for l in self.src if l.is_active()]
 
     @property
-    def active_dst(self):
+    def active_dst(self) -> list[Link]:
         return [l for l in self.dst if l.is_active()]
 
-    def active_dst_nodes(self, order=False):
+    def active_dst_nodes(self, order=False) -> list[Node]:
         if order:
             return [l.l_to for l in sorted(self.dst, key=lambda l: l.order) if l.is_active()]
         return [l.l_to for l in self.dst if l.is_active()]
@@ -954,11 +952,11 @@ class Link():
         self.priority = priority
         self.weight = weight
     
-    def is_link(self, l_from:Node, l_to:Node, order:float=-1):
+    def is_link(self, l_from:Node, l_to:Node, order:float=-1) -> bool:
         return self.l_from == l_from and self.l_to == l_to \
             and (order<0 or self.order == order)
 
-    def is_active(self):
+    def is_active(self) -> bool:
         return self.use == ''
 
     def delete(self):
@@ -978,7 +976,7 @@ class Link():
         self.priority = priority
         self.weight = weight
     
-    def to_dict(self):
+    def to_dict(self) -> dict[str,str|float]:
         result = {
             "from": self.l_from.name,
             "to": self.l_to.name,
@@ -989,30 +987,30 @@ class Link():
         return result if self.weight < 0 else result | {"weight": self.weight}
 
 
-def epsilon(value):
+def epsilon(value) -> int:
     return (1000 if value%10**6 else 10**6 if value%10**9 else 10**9)
 
-def epsilon2(decimal:str):
+def epsilon2(decimal:str) -> int:
     return 10**abs(int(decimal))
 
-def epsvalue(ev:ElementValue, values):
+def epsvalue(ev:Optional[ElementValue], values) -> int:
     return Node.epsilon_value * (len(values)+2)
 
-def cvalue(node:Node, vdic):
+def cvalue(node:Node, vdic) -> float:
     if node.name not in vdic or '円' in vdic[node.name].value:
-        return 0
+        return 0.
     return float(vdic[node.name].value)
 
-def subtotal(target, children, vdic):
+def subtotal(target, children, vdic) -> float:
     def f(v, target):
         return v.get_weight(target) if v.get_weight(target) is not None else 1.0
     calc_values = [f(v, target) * cvalue(v, vdic) for v in children]
     return sum(calc_values)
 
-def t(name:str):
+def t(name:str) -> str:
     return name.split('_')[-1]
 
-def nmmatch(tagname:str, matcher:List[str]) -> bool:
+def nmmatch(tagname:str, matcher:list[str]) -> bool:
     name = t(tagname)
     simple, complex = [],[]
     for x in [x for x in matcher]:

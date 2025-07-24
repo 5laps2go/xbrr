@@ -3,12 +3,18 @@ import shutil
 import time
 import unittest
 
-import tests.edinet.reader.doc as testdoc
 import xbrr
 from tests.utils import delay
+from xbrr.edinet.reader.doc import Doc
 
 
 class TestAPI(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        _dir = os.path.join(os.path.dirname(__file__), "data")
+        # S100DE5C : TIS Inc. 2018-06-27 report
+        cls.xbrl_doc = Doc(root_dir=os.path.join(_dir, "S100DE5C"), xbrl_kind="public")
 
     @classmethod
     def tearDownClass(cls):
@@ -46,16 +52,12 @@ class TestAPI(unittest.TestCase):
             os.remove(path)
 
     def test_extract(self):
-        path = os.path.join(os.path.dirname(__file__),
-                            "./data/xbrl2019.xbrl")
-
-        result = xbrr.reader.read(testdoc.Doc(path)).extract(
+        result = xbrr.reader.read(self.xbrl_doc).extract(
                     xbrr.edinet.aspects.Business).policy_environment_issue_etc
         self.assertTrue(result.value)
+        self.assertEqual(result.name, 'BusinessPolicyBusinessEnvironmentIssuesToAddressEtcTextBlock')
+        self.assertEqual(result.data_type, 'textBlock')
 
     def test_extract_element(self):
-        path = os.path.join(os.path.dirname(__file__),
-                            "./data/xbrl2019.xbrl")
-
-        result = xbrr.reader.read(testdoc.Doc(path)).extract("information", "number_of_directors")
-        self.assertEqual(result.value, 14)
+        result = xbrr.reader.read(self.xbrl_doc).extract("information", "number_of_directors")
+        self.assertEqual(result, 14)

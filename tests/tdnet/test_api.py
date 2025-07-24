@@ -1,8 +1,8 @@
-import datetime
 import os
 import shutil
 import time
 import unittest
+from datetime import date
 
 import xbrr
 from tests.utils import delay
@@ -26,7 +26,7 @@ class TestAPI(unittest.TestCase):
 
     @delay
     def test_api_documents(self):
-        documents = xbrr.tdnet.api.documents.get(str(datetime.date.today()))
+        documents = xbrr.tdnet.api.documents.get(str(date.today()))
         self.assertEqual(documents.metadata.count, len(documents.list))
 
         if len(documents.list) > 0:

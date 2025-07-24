@@ -23,11 +23,8 @@ class Document():
     @classmethod
     def create(cls, body: dict) -> "Document":
         def to_date(value, format):
-            if value:
-                f = "%Y-%m-%d" if format == "ymd" else "%Y-%m-%d %H:%M:%S"
-                return datetime.strptime(value, f)
-            else:
-                return None
+            f = "%Y-%m-%d" if format == "ymd" else "%Y-%m-%d %H:%M:%S"
+            return datetime.strptime(value, f).strftime(f)
 
         def to_bool(value):
             return True if value is not None else False

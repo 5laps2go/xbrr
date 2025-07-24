@@ -1,9 +1,11 @@
-import os
+from typing import TYPE_CHECKING, cast
 
+import os
 import bs4
 from bs4.element import NavigableString, Tag
 
 from xbrr.base.reader.base_element_schema import BaseElementSchema
+from xbrr.base.reader.base_reader import BaseReader
 
 
 class ElementSchema(BaseElementSchema):
@@ -29,12 +31,12 @@ class ElementSchema(BaseElementSchema):
         if data_type is not None and ':' in data_type:
             self.data_type = data_type.split(':')[-1].replace('ItemType','')
 
-    def set_alias(self, alias):
+    def set_alias(self, alias:str) -> 'ElementSchema':
         self.alias = alias
         return self
 
     @classmethod
-    def create_from_reference(cls, reader, reference) -> 'ElementSchema':
+    def create_from_reference(cls, reader:BaseReader, reference:str) -> 'ElementSchema':
         if not reader.xbrl_doc.has_schema: # for test purpose only
             name = reference.split("#")[-1]
             instance = cls(name=name, reference=reference)
@@ -46,10 +48,10 @@ class ElementSchema(BaseElementSchema):
 
 
     @classmethod
-    def read_schema(cls, reader, xsduri):
-        def find_labelLinkbaseRef(xsduri, xsd_xml):
+    def read_schema(cls, reader:BaseReader, xsduri:str):
+        def find_labelLinkbaseRef(xsduri, xsd_xml) -> str:
             base = os.path.splitext(os.path.basename(xsduri))[0]
-            for linkbaseref in xml.find_all("linkbaseRef"):
+            for linkbaseref in xsd_xml.find_all("linkbaseRef"):
                 role = linkbaseref.get("xlink:role",'')
                 href = linkbaseref["xlink:href"]
                 if role.endswith("/labelLinkbaseRef") and base in href and not href.endswith("-en.xml"):
@@ -61,11 +63,12 @@ class ElementSchema(BaseElementSchema):
         xml = reader.read_uri(xsduri)
         for element in xml.find_all("element"):
             # <xsd:element id="jpcrp030000-asr_E00436-000_Subsidy" xbrli:balance="credit" xbrli:periodType="duration" abstract="false" name="Subsidy" nillable="true" substitutionGroup="xbrli:item" type="xbrli:monetaryItemType" />
-            instance = cls(name=element["id"], alias=element["name"], 
-                            data_type=element["type"], 
-                            period_type=element["xbrli:periodType"],
-                            abstract=element["abstract"] if element.get("abstract") else "",
-                            balance=element.get("xbrli:balance") if element.get("xbrli:balance") else "")
+            assert isinstance(element, Tag)
+            instance = cls(name=cast(str,element["id"]), alias=cast(str,element["name"]),
+                            data_type=cast(str,element["type"]), 
+                            period_type=cast(str,element["xbrli:periodType"]),
+                            abstract=cast(str,element["abstract"]) if element.get("abstract") else "",
+                            balance=cast(str,element.get("xbrli:balance")) if element.get("xbrli:balance") else "")
             xsd_dic[element["id"]] = instance
 
         laburi = find_labelLinkbaseRef(xsduri, xml)
@@ -77,7 +80,7 @@ class ElementSchema(BaseElementSchema):
         return xsd_dic
 
     @classmethod
-    def read_label_taxonomy(cls, reader, laburi, xsd_dic):
+    def read_label_taxonomy(cls, reader:BaseReader, laburi:str, xsd_dic:dict[str,'ElementSchema']):
         label_xml = reader.read_uri(laburi)
         loc_dic = {}
         resource_dic = {}
@@ -92,7 +95,7 @@ class ElementSchema(BaseElementSchema):
             assert len(v) == 2
             loc_dic[elem['xlink:label']] = v[1]
 
-        def read_label_label(elem: bs4.element.Tag):
+        def read_label_label(elem:Tag):
             attrs = elem.attrs
 
             if 'xlink:label' in attrs and 'xlink:role' in attrs:
@@ -102,7 +105,7 @@ class ElementSchema(BaseElementSchema):
                     and elem['xlink:label'] not in resource_dic:
                     resource_dic[elem['xlink:label']] = {'role': elem['xlink:role'], 'text': elem.text}
 
-        def read_label_labelArc(elem: bs4.element.Tag):
+        def read_label_labelArc(elem:Tag):
             attrs = elem.attrs
 
             if 'xlink:from' in attrs and 'xlink:to' in attrs and elem['xlink:to'] in resource_dic:
@@ -112,20 +115,24 @@ class ElementSchema(BaseElementSchema):
                     ele.set_label(**res) # Label(res['role'], res['text'])
 
         for elem in label_xml.find_all('labelLink'): # "link:labelLink"
+            assert isinstance(elem, Tag)
             for child in elem.find_all('loc'):
+                assert isinstance(child, Tag)
                 read_label_loc(child)
             for child in elem.find_all('label'):
+                assert isinstance(child, Tag)
                 read_label_label(child)
             for child in elem.find_all('labelArc'):
+                assert isinstance(child, Tag)
                 read_label_labelArc(child)
 
-    def set_label(self, role, text):
+    def set_label(self, role:str, text:str):
         if role.endswith('label'):
             self.label = text.strip()
         elif role.endswith('verboseLabel'):
             self.verbose_label = text.strip()
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str,str]:
         return {
             "name": self.name,
             "reference": self.reference,

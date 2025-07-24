@@ -4,7 +4,6 @@ import unittest
 from xbrr.edinet.client.document_client import DocumentClient
 from xbrr.xbrl.reader.reader import Reader
 from xbrr.edinet.reader.doc import Doc
-import tests.edinet.reader.doc as testdoc
 from xbrr.edinet.reader.aspects.finance import Finance
 
 
@@ -18,7 +17,6 @@ class TestFinance(unittest.TestCase):
                                     expand_level="dir")
         xbrl_doc = Doc(root_dir=str(root_dir), xbrl_kind="public")
         cls.reader = Reader(xbrl_doc, save_dir=_dir)
-        cls._dir = _dir
 
     @classmethod
     def tearDownClass(cls):
@@ -26,28 +24,22 @@ class TestFinance(unittest.TestCase):
         if os.path.exists(cls.reader.taxonomy_repo.taxonomies_root):
             shutil.rmtree(cls.reader.taxonomy_repo.taxonomies_root)
 
-    def get_xbrl(self):
-        path = os.path.join(os.path.dirname(__file__),
-                            "../../data/xbrl2019.xbrl")
-        xbrl = Reader(testdoc.Doc(path), save_dir=self._dir)
-        return xbrl
-
     def test_voluntary_accounting_policy_change(self):
-        xbrl = self.get_xbrl()
-        feature = xbrl.extract(Finance).voluntary_accounting_policy_change
-        self.assertEqual(feature.value, None)
+        # xbrl = self.get_xbrl()
+        feature = self.reader.extract(Finance).voluntary_accounting_policy_change
+        self.assertEqual(feature, None)
 
     def test_segment_information(self):
-        xbrl = self.get_xbrl()
-        feature = xbrl.extract(Finance).segment_information
+        # xbrl = self.get_xbrl()
+        feature = self.reader.extract(Finance).segment_information
         self.assertTrue(feature.normalized_text.startswith("(セグメント情報等)"))
-        self.assertEqual(feature.label, "")
+        self.assertEqual(feature.label, "セグメント情報等")
         self.assertEqual(feature.context, "CurrentYearDuration")
 
     def test_real_estate_for_lease(self):
-        xbrl = self.get_xbrl()
-        feature = xbrl.extract(Finance).real_estate_for_lease
-        self.assertEqual(feature.value, None)
+        # xbrl = self.get_xbrl()
+        feature = self.reader.extract(Finance).real_estate_for_lease
+        self.assertEqual(feature, None)
 
     def test_segment_information_by_EDINET(self):
         feature = self.reader.extract(Finance).segment_information

@@ -32,13 +32,13 @@ class Taxonomy(BaseTaxonomy):
         version = ''
         m = re.match(r'http://.*.tdnet.info/(taxonomy/jp/tse/tdnet/[^/]{2}/[^/]/(\d{4}-\d{2}-\d{2})|jp/br/tdnet/[^/]/[^/]{2}/(\d{4}-\d{2}-\d{2}))', namespace)
         if m != None:
-            version = m.group(2) if m.group(2) else m.group(3)
+            version = m.group(2) if m.group(2) else m.group(3) if m.group(3) else m.group(4)
         return version
 
     def provision(self, version:str):
         self.__download(version, self.TAXONOMIES)
 
-    def is_defined(self, uri:str):
+    def is_defined(self, uri:str) -> bool:
         return uri.startswith(self.prefix)
 
     def implicit_xsd(self, namespace:str) -> str:

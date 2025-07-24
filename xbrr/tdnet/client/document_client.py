@@ -1,8 +1,9 @@
+from typing import Optional
+
 import re
 import tempfile
 from pathlib import Path
 from zipfile import ZipFile
-
 import requests
 
 from xbrr.xbrl.models.error_response import ErrorResponse
@@ -74,7 +75,7 @@ class DocumentClient():
 
     def get_xbrl(self, document_id: str,
                  save_dir: str = "",
-                 expand_level: str = "dir") -> Path:
+                 expand_level:Optional[str] = "dir") -> Path:
         """Get XBRL file.
 
         Arguments:

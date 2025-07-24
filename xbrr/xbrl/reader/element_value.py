@@ -1,17 +1,21 @@
-from xbrr.base.reader.base_element_value import BaseElementValue
-from xbrr.xbrl.reader.element_schema import ElementSchema
+from typing import Callable, cast
+
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
+
+from xbrr.base.reader.base_element_value import BaseElementValue
+from xbrr.base.reader.base_reader import BaseReader
+from xbrr.xbrl.reader.element_schema import ElementSchema
 
 
 class ElementValue(BaseElementValue):
 
     hankaku_dic = str.maketrans('１２３４５６７８９０（）［］','1234567890()[]')
 
-    def __init__(self, name="", reference="",
-                 value="", unit="", decimals="",
-                 context_ref={},
-                 lazy_schema=lambda:ElementSchema()):
+    def __init__(self, name:str, reference="",
+                 value:str="", unit="", decimals="",
+                 context_ref:dict[str,str]={},
+                 lazy_schema:Callable[[], ElementSchema]=lambda:ElementSchema()):
         super().__init__()
         self.name = name
         self.reference = reference
@@ -22,50 +26,50 @@ class ElementValue(BaseElementValue):
         self.lazy_schema = lazy_schema
 
     @property
-    def normalized_text(self):
+    def normalized_text(self) -> str:
         return self.normalize(self.html.text)
 
     @property
-    def html(self):
-        html_text = self.value.strip().replace("&lt;", "<").replace("&gt;", ">")
+    def html(self) -> BeautifulSoup:
+        html_text = self.value.strip().replace("&lt;", "<").replace("&gt;", ">") if self.value else ''
         html = BeautifulSoup(html_text, "html.parser")
         return html
 
     @property
-    def context(self):
+    def context(self) -> str:
         return self.context_ref['id'].split('_')[0]
 
     @property
-    def label(self):
+    def label(self) -> str:
         attr_name = '_lazy_schema'
         if not hasattr(self, attr_name):
             setattr(self, attr_name, self.lazy_schema())
         return getattr(self, attr_name).label
 
     @property
-    def data_type(self):
+    def data_type(self) -> str:
         attr_name = '_lazy_schema'
         if not hasattr(self, attr_name):
             setattr(self, attr_name, self.lazy_schema())
         return getattr(self, attr_name).data_type
 
     @classmethod
-    def create_element_value(cls, reader, xml_el, context_dic):
+    def create_element_value(cls, reader:BaseReader, xml_el:Tag, context_dic:dict[str,dict[str,str]]) -> 'ElementValue':
         name = xml_el.name
         value = xml_el.text.strip().translate(cls.hankaku_dic)
         unit = ""
         if "unitRef" in xml_el.attrs:
-            unit = xml_el["unitRef"]
+            unit = cast(str,xml_el["unitRef"])
 
         decimals = ""
         if "decimals" in xml_el.attrs:
-            decimals = xml_el["decimals"]
+            decimals = cast(str,xml_el["decimals"])
 
         reference = f"{xml_el.namespace}#{xml_el.prefix}_{xml_el.name}"
 
         context_ref = {}
         if "contextRef" in xml_el.attrs:
-            context_id = xml_el["contextRef"]
+            context_id = cast(str,xml_el["contextRef"])
             context_ref = context_dic[context_id]
         
         if xml_el.get("xsi:nil",'')=='true':
@@ -80,7 +84,7 @@ class ElementValue(BaseElementValue):
         return instance
 
     @classmethod
-    def read_xbrl_values(cls, reader, xbrl_doc):
+    def read_xbrl_values(cls, reader:BaseReader, xbrl_doc:BeautifulSoup) -> tuple[dict[str,dict[str,str]],dict[str,list['ElementValue']],dict[str,str]]:
         context_dic = {}
         value_dic = {}
         namespace_dic  = {}
@@ -100,7 +104,7 @@ class ElementValue(BaseElementValue):
                         period_start = elem.find("xbrli:startDate").text
                         context_val = {'id': context_id, 'period': period, 'period_start': period_start}
                     if elem.find("xbrldi:explicitMember"):
-                        dimension = elem.find("xbrldi:explicitMember")["dimension"]
+                        dimension = ','.join([x["dimension"].split(':')[-1] for x in elem.find_all("xbrldi:explicitMember")]) # elem.find("xbrldi:explicitMember")["dimension"]
                         context_val.update({'dimension':dimension})
                     context_dic[context_id] = context_val
             elif elem.prefix == 'xbrldi':
@@ -109,11 +113,10 @@ class ElementValue(BaseElementValue):
                 instance = cls.create_element_value(reader, elem, context_dic)
                 name = f"{elem.prefix}_{elem.name}"
                 if name not in value_dic:
-                    value_dic[name] = [instance]
-                else:
-                    value_dic[name].append(instance)
+                    value_dic[name] = []
+                value_dic[name].append(instance)
         
-        xbrl_xml = xbrl_doc.find("xbrli:xbrl")
+        xbrl_xml = cast(Tag,xbrl_doc.find("xbrli:xbrl"))
         nsdecls = xbrl_xml.attrs
         for a in nsdecls:
             if a.startswith("xmlns:"):
@@ -124,7 +127,7 @@ class ElementValue(BaseElementValue):
                 read_value(child)
         return context_dic, value_dic, namespace_dic
     
-    def to_dict(self):
+    def to_dict(self) -> dict[str,str|bool|None]:
         context_id = self.context_ref['id']
         id_parts = context_id.split("_", 1)
         member = ''
@@ -140,7 +143,7 @@ class ElementValue(BaseElementValue):
             "consolidated": "NonConsolidated" not in context_id,
             "context": id_parts[0],
             "member": member,
-            "dimension": self.context_ref.get('dimension','').split(':')[-1],
+            "dimension": self.context_ref.get('dimension',''),
             "period": self.context_ref['period'],
             "period_start": self.context_ref['period_start'] if 'period_start' in self.context_ref else None,
             "label": self.label,

@@ -23,5 +23,5 @@ class BaseClient():
         self.apikey = pitdata['edinet_apikey']
 
     @property
-    def endpoint(self):
+    def endpoint(self) -> str:
         return self.BASE_URL.format(self.version, self.target)

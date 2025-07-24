@@ -1,8 +1,12 @@
+from typing import Literal, Optional
+
 import re
 import warnings
 from datetime import date, datetime
+from pandas import DataFrame
 
 from xbrr.base.reader.base_parser import BaseParser
+from xbrr.xbrl.reader.reader import Reader
 from xbrr.xbrl.reader.element_value import ElementValue
 
 
@@ -13,15 +17,15 @@ class Forecast(BaseParser):
         'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
         'fc_q2ytd': ["InformationQ2YTD"],
     }
-    tse_t_ed_role_candiates = {
+    tse_t_ed_role_candiates: dict[str, list[str]] = {
         'fc': ["Consolidated"], #有価証券報告書,決算短信,業績予想の修正
         'fc_dividends': [],   #有価証券報告書,決算短信,配当予想の修正
         'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
     }
 
 
-    def __init__(self, reader):
-        def gen_fiscal_period_kind(m):
+    def __init__(self, reader:Reader):
+        def gen_fiscal_period_kind(m:re.Match[str]) -> str:
             quoater = '2' if m.group(1)is not None and m.group(2) is None else m.group(2)
             return 'Q'+quoater if quoater is not None else '0'
         tags = {
@@ -77,6 +81,9 @@ class Forecast(BaseParser):
             self.namespace_prefix = 'tse-t-ed'
             self.role_candidates = self.tse_t_ed_role_candiates
 
+        if self.document_name is None:
+            raise Exception("Unknown titile found!")
+
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
         m = re.search(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
@@ -101,14 +108,14 @@ class Forecast(BaseParser):
 
     def get_security_code(self):
         value = self.get_value("security_code")
-        return value.value if value.value and len(value.value)>=4 else self.reader.xbrl_doc.company_code
+        return value.value if value and len(value.value)>=4 else self.reader.xbrl_doc.company_code
 
     def get_company_name(self):
         value = self.get_value("company_name")
-        return value.value if value.value else 'not found'
+        return value.value if value else 'not found'
 
     @property
-    def accounting_standard(self):
+    def accounting_standard(self) -> Literal['jp','if','us']:
         std = 'jp'
         if self.reader.find_value_name(lambda x: x.endswith('IFRS')):
             std = 'if'
@@ -117,7 +124,7 @@ class Forecast(BaseParser):
         return std
     
     @property
-    def reporting_date(self):
+    def reporting_date(self) -> ElementValue:
         wareki = {'令和': 2019, '平成': 1989, '昭和': 1926}
         def wareki2year(elemvalue):
             date1 = elemvalue.value.replace(' ','')
@@ -128,25 +135,24 @@ class Forecast(BaseParser):
                         waname+m.groups()[0],str(int(m.groups()[0])+wareki[waname]-1))
             return elemvalue
 
-        if self.filling_date.value is not None:
+        if self.filling_date is not None:
             return wareki2year(self.filling_date)
-        if self.forecast_correction_date.value is not None:
+        if self.forecast_correction_date is not None:
             return wareki2year(self.forecast_correction_date)
-        if self.dividend_correction_date.value is not None:
+        if self.dividend_correction_date is not None:
             return wareki2year(self.dividend_correction_date)
         raise NameError('Reporting date not found')
 
     @property
-    def reporting_iso_date(self):
-        try:
-            report_date = self.reporting_date.value
-            m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
-            return date(*(int(x) for x in m.groups())).isoformat()
-        except (NameError, AttributeError):
+    def reporting_iso_date(self) -> str:
+        report_date = self.reporting_date.value
+        m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
+        if m is None:
             return self.reader.xbrl_doc.published_date[0].date().isoformat()
+        return date(*(int(x) for x in m.groups())).isoformat()
     
     @property
-    def forecast_period(self):
+    def forecast_period(self) -> str:
         # 'Role(Quarterly)?Forecasts' for (quarterly)? report which may have 業績予想
         # 'Role(Quarterly)?Dividends' for (quarterly)? report which may have 配当予想
         # 'Role(Non)?ConsolidatedInformationAnnual' for '業績予想の修正'
@@ -157,18 +163,18 @@ class Forecast(BaseParser):
         return 'FY'
 
     @property
-    def fiscal_year_end_date(self):
+    def fiscal_year_end_date(self) -> datetime:
         value = self.get_value("fiscal_date_end")
-        date = datetime.strptime(value.value, "%Y-%m-%d") if value.value else None
-        return ElementValue('fiscal_year_end_date', value=date)
+        assert value is not None
+        return datetime.strptime(value.value, "%Y-%m-%d")
 
     @property
-    def fc_q2ytd_period(self):
+    def fc_q2ytd_period(self) -> str:
         role = self.__find_role_name('fc_q2ytd')
         if len(role) <= 0: return ''
         return 'Q2'
 
-    def fc(self,  latest_filter=False):
+    def fc(self,  latest_filter=False) -> Optional[DataFrame]:
         # year forecast:  'ForecastMemger','(Upper|Lower)Member' in member and 'CurrentYearDuration' = context
         # q2   forecast:  'ForecastMember','(Upper|Lower)Member' in member and 'CurrentAccumulatedQ2Duration' = context
         role = self.__find_role_name('fc')
@@ -178,7 +184,7 @@ class Forecast(BaseParser):
 
         fc = self.reader.read_value_by_role(role_uri)
         if self.namespace_prefix=='tse-t-ed':
-            pre_ver = self.reader.schema_tree.presentation_version()
+            pre_ver = self.reader.presentation_version()
             if pre_ver in ['2012-03-31', '2012-06-30']:
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_0_label': 'label'})
             elif pre_ver in ['2011-03-31', '2011-06-30']:
@@ -188,7 +194,7 @@ class Forecast(BaseParser):
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
         return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=True)
 
-    def fc_dividends(self, latest_filter=False):
+    def fc_dividends(self, latest_filter=False) -> Optional[DataFrame]:
         role = self.__find_role_name('fc_dividends')
         if len(role) <= 0: return None
         role = role[0]
@@ -201,9 +207,9 @@ class Forecast(BaseParser):
         import numpy as np
         if self.namespace_prefix=='tse-t-ed':
             try:
-                if self.ForecastDividendPerShare.value is not None:
+                if self.ForecastDividendPerShare is not None:
                     return float(self.ForecastDividendPerShare.value)
-                if self.ForecastUpperDividendPerShare.value is not None:
+                if self.ForecastUpperDividendPerShare is not None and self.ForecastLowerDividendPerShare is not None:
                     upper = float(self.ForecastUpperDividendPerShare.value)
                     lower = float(self.ForecastLowerDividendPerShare.value)
                     return (upper + lower)/2
@@ -227,12 +233,12 @@ class Forecast(BaseParser):
         q2ytd = self.reader.read_value_by_role(role_uri)
         return q2ytd if q2ytd is None or not latest_filter else self.__filter_accounting_items(q2ytd)
 
-    def __filter_out_str(self):
+    def __filter_out_str(self) -> str:
         filter_out_str = 'NonConsolidated' if self.consolidated\
             else '(?<!Non)Consolidated'
         return filter_out_str
 
-    def __filter_accounting_items(self, data, consolidate_filter=True):
+    def __filter_accounting_items(self, data:DataFrame, consolidate_filter=True) -> Optional[DataFrame]:
         if data.size == 0:
             return None
         
@@ -252,7 +258,7 @@ class Forecast(BaseParser):
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
 
-    def __find_role_name(self, finance_statement, latest_filter=False):
+    def __find_role_name(self, finance_statement:str, latest_filter=False) -> list[str]:
         def consolidate_type_filter(roles):
             if not latest_filter:
                 return roles

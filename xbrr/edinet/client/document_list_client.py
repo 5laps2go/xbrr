@@ -1,6 +1,4 @@
 from datetime import datetime
-from typing import Dict, Union
-
 import requests
 
 from xbrr.edinet.client.base_client import BaseClient
@@ -18,7 +16,7 @@ class BaseDocumentListClient(BaseClient):
         super().__init__(target="documents.json")
         self.response_type = response_type
 
-    def _get(self, date: Union[str, datetime]) -> Dict:
+    def _get(self, date:str|datetime) -> dict:
         """Get Document List API response.
 
         Arguments:
@@ -61,7 +59,7 @@ class MetaDataClient(BaseDocumentListClient):
     def __init__(self):
         super().__init__(response_type="1")  # 1 = only metadata.
 
-    def get(self, date: Union[str, datetime]) -> MetaData:
+    def get(self, date:str|datetime) -> MetaData:
         """Get metadeta response.
 
         Arguments:
@@ -81,7 +79,7 @@ class DocumentListClient(BaseDocumentListClient):
     def __init__(self):
         super().__init__(response_type="2")  # 2 = metadata and document list.
 
-    def get(self, date: Union[str, datetime]) -> Documents:
+    def get(self, date:str|datetime) -> Documents:
         """Get metadeta response.
 
         Arguments:
