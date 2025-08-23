@@ -1,16 +1,24 @@
+from typing import Optional, Literal, Callable, cast
+
+from datetime import date, datetime, timedelta
+import calendar
 import collections
 import importlib
 import importlib.util
 import itertools
 import re
 import warnings
+from bs4 import BeautifulSoup
 import pandas as pd
 from logging import getLogger
+
+from pandas import DataFrame
 
 if importlib.util.find_spec("pandas") is not None:
     import pandas as pd
 
 from xbrr.base.reader.base_parser import BaseParser
+from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
 
 
@@ -22,10 +30,12 @@ class Finance(BaseParser):
             "segment_information": "jpcrp_cor:NotesSegmentInformationEtcConsolidatedFinancialStatementsTextBlock",
             "real_estate_for_lease": "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock",
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
-            "_fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
-            # "fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
+            "_report_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
+            "_fiscal_year_start_date": "jpdei_cor:CurrentFiscalYearStartDateDEI",
+            "_fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
             "company_name": "jpdei_cor:FilerNameInJapaneseDEI",
 
+            "_fiscal_year_end_date0": "tse-o-di:FiscalYearEnd",
             "report_FY": "tse-o-di:TypeOfReports-Annual",
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
             "report_Q2": "tse-o-di:TypeOfReports-SecondQuarter",
@@ -37,27 +47,50 @@ class Finance(BaseParser):
             "whether_consolidated": "jpdei_cor:WhetherConsolidatedFinancialStatementsArePreparedDEI",
         }
 
+        self._YTD_role_piece = ["YearToQuarterEnd", "IncomeYTD"] # 四半期累計期間
+        self._Quarter_period_role_piece = ["QuarterPeriod", "IncomeQuater"] # 四半期会計期間
+
         super().__init__(reader, ElementValue, tags)
 
     def get_security_code(self):
         return self.reader.xbrl_doc.company_code
 
-    def get_company_name(self):
+    def get_company_name(self) -> str:
         value = self.get_value("company_name")
         return value.value if value else 'not found'
 
     @property
-    def fiscal_year_end_date(self):
-        return self.reader.xbrl_doc.fiscal_year_date
+    def fiscal_year_start_date(self) -> date:
+        value = self.get_value("_fiscal_year_start_date")
+        if value is not None:
+            return datetime.strptime(value.value, "%Y-%m-%d").date()
+        else:  # backward compatibility for old style xbrl
+            end_date = self.fiscal_year_end_date
+            assert end_date != None
+            start_date = end_date - timedelta(days=364)
+            return date(year=start_date.year, month=start_date.month, day=1)
 
     @property
-    def reporting_iso_date(self):
+    def fiscal_year_end_date(self) -> date:
+        value = self.get_value("_fiscal_year_end_date")
+        if value is not None:
+            return datetime.strptime(value.value, "%Y-%m-%d").date()
+        else:  # backward compatibility for old style xbrl
+            value = self.get_value("_fiscal_year_end_date0")
+            return datetime.strptime(value.value, "%Y-%m-%d").date() if value else date(year=9999, month=12, day=31)
+
+    @property
+    def report_period_end_date(self) -> date:
+        return self.reader.xbrl_doc.report_period_end_date
+
+    @property
+    def reporting_iso_date(self) -> str:
         return self.reader.xbrl_doc.published_date[0].date().isoformat()
 
     @property
-    def fiscal_period_kind(self):
-        if self._fiscal_period_kind is not None:
-            return self._fiscal_period_kind
+    def report_period_kind(self) -> ElementValue:
+        if self._report_period_kind is not None:
+            return self._report_period_kind
         if self.report_Q1 and self.report_Q1.value=='true':
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q1")
         if self.report_Q2 and self.report_Q2.value=='true':
@@ -67,137 +100,123 @@ class Finance(BaseParser):
         return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="FY")
 
     @property
-    def consolidated(self):
+    def consolidated(self) -> bool:
         return self.reader.xbrl_doc.consolidated
 
-    def bs(self, latest_filter=False):
-        cal = {
-            'CurrentLiabilities': ['Liabilities'],
-            'NoncurrentLiabilities': ['Liabilities'],
-            'Liabilities': ['LiabilitiesAndNetAssets'],
-        }
-        roles = self.__find_role_name('bs', latest_filter)
-        if len(roles) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
+    def bs(self, latest2year=False) -> DataFrame:
+        role_uri = self.find_role_name('bs')
+        if not role_uri:
+            textblock = self.read_value_by_textblock('bs')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        role = roles[0]
-        role_uri = self.reader.get_role(role).uri
 
-        bs = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
-        return bs if not latest_filter else self.__filter_accounting_items(bs)
+        bs = self.reader.read_value_by_role(role_uri, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
+        return self.latest2year(bs, latest2year)
 
-    def pl(self, latest_filter=False):
-        cal = {
-            'NetSales': ['GrossProfit','OperatingIncome','GrossProfitNetGP','GrossOperatingRevenue'],
-            'CostOfSales': ['GrossProfit','OperatingIncome','OperatingGrossProfit'],
-            'GrossProfit': ['OperatingIncome','OperatingGrossProfit','GrossProfitNetGP','GrossOperatingProfit','OrdinaryIncome'], # GrossOperatingProfit:2020-10-02 8184, OrdinaryIncome:2023-02-14 6561
-            'SellingGeneralAndAdministrativeExpenses': ['OperatingIncome','OperatingExpenses','OrdinaryIncome'], # OrdinaryIncome:2023-02-14 6561
-            # 'GeneralAndAdministrativeExpensesSGA':  ['OperatingIncome','OperatingExpenses'],
-            'OperatingIncome': ['OrdinaryIncome'],
-            'NonOperatingIncome': ['OrdinaryIncome'],
-            'NonOperatingExpenses': ['OrdinaryIncome'],
-            'OrdinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
-            'ExtraordinaryIncome': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
-            'ExtraordinaryLoss': ['IncomeBeforeIncomeTaxes','ProfitLoss'],
-            'IncomeBeforeIncomeTaxes': ['IncomeBeforeMinorityInterests','ProfitLoss', 'NetIncome'],
-            'IncomeBeforeMinorityInterests': ['NetIncome'],
-
-            'ProfitLossBeforeTaxIFRS': ['ProfitLossIFRS','ProfitLossFromContinuingOperationsIFRS'],
-        }
+    def pl(self, latest2year=False) -> DataFrame:
         fix_cal = ['GrossProfit','GrossProfitNetGP','OperatingGrossProfit','GrossProfitIFRS',  # '~^GrossProfit.{,5}$', 1848:2011-05-11 fail, 
                    'OperatingIncome', 'OperatingProfitLossIFRS','<OperatingIncome','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
                    'OrdinaryIncome','OrdinaryIncomeBNK','>OrdinaryProfitLoss','~(Operating|Ordinary)[Ll]oss$',
                    'ProfitLossBeforeTax','ProfitLossBeforeTaxIFRS',  # 2282:2022-05-10
                    'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
 
-        roles = self.__find_role_name('pl', latest_filter)
-        if len(roles) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfIncome"])
+        role_uri = self.find_role_name('pl', exclusion=self._Quarter_period_role_piece)
+        if not role_uri:
+            textblock = self.read_value_by_textblock('pl')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        roleYTD = [x for x in roles if x.endswith('YTD')]
-        role = roles[0] if not roleYTD else roleYTD[0]
-        role_uri = self.reader.get_role(role).uri
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_cal=cal, fix_cal_node=fix_cal)
-        return pl if not latest_filter else self.__filter_accounting_items(pl)
+        pl = self.reader.read_value_by_role(role_uri, fix_cal_node=fix_cal, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
+        return self.latest2year(pl, latest2year)
 
-    def cf(self, latest_filter=False):
-        roles = self.__find_role_name('cf',latest_filter)
-        if len(roles) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
+    def cf(self, latest2year=False) -> DataFrame:
+        role_uri = self.find_role_name('cf')
+        if not role_uri:
+            textblock = self.read_value_by_textblock('cf')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
-        role = roles[0]
-        role_uri = self.reader.get_role(role).uri
 
-        cf = self.reader.read_value_by_role(role_uri)
-        return cf if not latest_filter else self.__filter_accounting_items(cf)
+        cf = self.reader.read_value_by_role(role_uri, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
+        return self.latest2year(cf, latest2year)
 
-    def __filter_out_str(self):
-        filter_out_str = 'NonConsolidated' if self.consolidated\
-            else '(?<!Non)Consolidated'
-        return filter_out_str
+    def latest2year(self, df:DataFrame, latest2year:bool) -> DataFrame:
+        if latest2year and 'context' in df.columns:
+            no_quarter = '~context.str.contains("Quarter")|~context.str.contains("Duration")'  # eliminate QuarterDuration, not QuarterInstance
+            df = df.query(no_quarter, engine='python')
+        return df if not df.empty else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
-    def __filter_accounting_items(self, data):
-        if data is None:
-            return data
-        query_str = 'consolidated=={}'.format(self.consolidated)
-        consolidated = data.query(query_str, engine='python')
-        query = '~context.str.contains("Quarter")|~context.str.contains("Duration")'
-        filtered = consolidated.query(query, engine='python')
-        if filtered.shape[0] < consolidated.shape[0]/2 * 0.8: # YearYTDDuration is prioritized
-            filtered = consolidated.query('~({})'.format(query), engine='python')
-        filtered['depth'] = self.reader.shrink_depth(filtered['depth'], data['depth'])
-        # Exclude dimension member because NetAssets/EquityIFRS with variety of member attributes
-        filtered = filtered.query('~dimension.str.contains("OperatingSegments")', engine='python')
-        # filtered = filtered.query('~dimension.str.contains("ComponentsOfEquity")', engine='python')
-        # set NetAssets member as name
-        filtered.loc[filtered['member']!='','name']=filtered['member']
-        filtered.loc[filtered['member']!='','depth']='+0'
-        filtered.drop_duplicates(subset=("name", "context" ,"period"), keep="first", inplace=True)
-        return filtered
+    def scan_presentation(self) -> list[BaseReader.PreTable|BaseReader.PreHeading]:
+        return self.reader.role_decision_info
 
-    def __find_role_name(self, finance_statement, latest_filter=False):
-        def consolidate_type_filter(roles):
-            if not latest_filter:
-                return roles,[]
-            filter_out_str = self.__filter_out_str()
-            filtered_roles = [x for x in roles if not re.search(filter_out_str, x) and 'Notes' not in x]
-            return [x for x in filtered_roles if 'Consolidated' in x],[x for x in filtered_roles if 'Consolidated' not in x]
-        def role_candidate_order(role, candidates):
-            for i, candidate in enumerate(candidates):
-                if candidate in role:
-                    for j, period in enumerate(role_periods):
-                        if period in role:
-                            return j*7 + i
-                    return len(role_periods)*7 + i
-            return 999
-        role_candidates = {
-            'bs': ["StatementOfFinancialPosition", "BalanceSheet"],
-            'pl': ["StatementOfIncome", "StatementsOfIncome", "StatementOfProfitOrLoss", "(?<!Comprehensive)Income"], # ComprehensiveIncome should be lowest priority
-            'cf': ["StatementOfCashFlows", "CashFlow"],
+    def find_role_name(self, finance_type:Literal['bs','pl','cf'], exclusion:list[str]=[]) -> Optional[str]:
+        scanstable = [x for x in self.scan_presentation() if 'table' in x]
+        # old style presentation before 2014
+        if all([x['table']=='' for x in scanstable]):
+            return self.find_role_name2013(scanstable, finance_type)
+        # current style presentation after 20140116
+        assert any([x['table']!='' for x in scanstable])
+        return self.find_role_nameXXXX(scanstable, finance_type, exclusion)
+
+    def find_role_nameXXXX(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf'], exclusion:list[str]) -> Optional[str]:
+        table_candidates = {
+            'jp': {  # Japanese GAAP
+                'bs': ['BalanceSheetTable'],
+                'pl': ['StatementOfIncomeTable'],
+                'cf': ['StatementOfCashFlowsTable'],
+                'che': ['StatementOfChangesInEquityTable'],
+
+            },
+            'if': {  # IFRS
+                'bs': ['StatementOfFinancialPositionIFRSTable'],
+                'pl': ['StatementOfProfitOrLossIFRSTable', 'StatementOfComprehensiveIncomeIFRSTable'],  # StatementOfProfitOrLossIFRSTable from 2019-04-23, StatementOfComprehensiveIncomeIFRSTable without ProfitOrLossIFRSTable from 2019-04-25
+                'cf': ['StatementOfCashFlowsIFRSTable'],
+                'che': ['StatementOfChangesInEquityTable', 'StatementOfChangesInEquityIFRSTable'],
+            },
+            'us': {  # US GAAP
+                'bs': ['BalanceSheetTable'],
+                'pl': ['StatementOfIncomeTable'],
+                'cf': ['StatementOfCashFlowsTable'],
+                'che': ['StatementOfChangesInEquityTable'],
+            }
         }
-        role_periods = ['QuarterEnd', 'SemiAnnual', 'QuarterPeriod', 'Quarterly']
-        cons_or_noncons_roles, other_roles = consolidate_type_filter(list(self.reader.custom_roles.keys()))
-        roles = sorted(filter(lambda x: role_candidate_order(x, role_candidates[finance_statement])<900, cons_or_noncons_roles+other_roles),
-                       key=lambda x: role_candidate_order(x, role_candidates[finance_statement]))
-        if self.reader.xbrl_doc.accounting_standard=='if':
-            rolesIFRS = [x for x in roles if x.endswith('IFRS')]
-            if rolesIFRS: return rolesIFRS
-        if self.reader.xbrl_doc.accounting_standard=='us':
-            rolesUS = [x for x in roles if x.endswith('US')]
-            if rolesUS: return rolesUS
-        return roles
+        accounting_standards = self.reader.xbrl_doc.accounting_standard
+        for table in table_candidates[accounting_standards][finance_type]:
+            for scan in scans:
+                if table == scan['table'] and self.consolidated == (scan['cons_nocons']=="ConsolidatedMember"):
+                    if any([ex in scan['xlink_role'] for ex in exclusion]):
+                        continue
+                    return scan['xlink_role']
+        return None
 
-    def __read_value_by_textblock(self, candidates):
-        values = self.reader.find_value_names(candidates)
-        textblocks = [x for x in values if x.endswith('TextBlock')]
-        if len(textblocks) == 0:
-            return None
-        element_value = self.reader.findv(textblocks[0])
-        return element_value
+    def find_role_name2013(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf']) -> Optional[str]:
+        table_candidates2013 = {
+            'bs': ['BalanceSheets'],
+            'pl': ['StatementsOfIncomeYTD','StatementsOfIncome'],
+            'cf': ['StatementsOfCashFlows'],
+            'cha': ['StatementsOfChangesInNetAssets'],
+        }
+        for table in table_candidates2013[finance_type]:
+            for scan in scans:
+                if table in scan['xlink_role'] and \
+                    (not self.consolidated) == ('NonConsolidated' in scan['xlink_role'].split(table)[0]):   # ConsolidatedXXX, ConsolidatedQuarterlyXXX
+                    return scan['xlink_role']
+        return None
+
+    def read_value_by_textblock(self, finance_type:Literal['bs','pl','cf']) -> Optional[ElementValue]:
+        textblock_candidates = {
+            'bs': ['BalanceSheetHeading'], #,'StatementOfFinancialPositionIFRSHeading']) # 
+            'pl': ['StatementOfIncomeHeading','StatementOfProfitOrLossIFRSHeading','StatementOfComprehensiveIncomeSingleStatementHeading'], # StatementOfComprehensiveIncomeSingleStatementHeading:6464:2018-02-14
+            'cf': ['StatementOfCashFlowsHeading','StatementOfCashFlowsIFRSHeading'],
+        }
+        scansheading = [x for x in self.reader.role_decision_info if 'heading' in x]
+        for heading in textblock_candidates[finance_type]:
+            for scan in scansheading:
+                if heading == scan['heading'] and \
+                   self.consolidated == (scan['cons_nocons']=='Consolidated'):
+                    textblock_name = ':'.join(scan['xlink_href'].split('_', 2))
+                    textblock = self.reader.findv(textblock_name)
+                    return textblock
+        return None
 
     def __read_finance_statement(self, statement_xml):
         def myen(vtext, unit):
@@ -254,13 +273,6 @@ class Finance(BaseParser):
                 prevcol = year_index[1][1]
                 if year_index[0][0] < year_index[1][0]: thiscol, prevcol = prevcol, thiscol
             return thiscol, prevcol
-            # for c in columns:
-            #     if c.text.strip().startswith('前') and '増減' not in c.text or c.text.strip().startswith(prev_str):
-            #         prevcol = idx - collen
-            #     elif c.text.strip().startswith('当') or c.text.strip().startswith(this_str):
-            #         thiscol = idx - collen
-            #     idx = idx + int(c.get('colspan','1'))
-            # return thiscol, prevcol
         def analyze_column(label, columns, tc, pc):
             def adjust(columns, idx):
                 for i in range(3):
@@ -279,7 +291,7 @@ class Finance(BaseParser):
                 for record in thead.find_all('tr', recursive=False):
                     columns = list(record.find_all('td', recursive=False))
                     if len(values)==0:
-                        this_str = str(self.fiscal_year_end_date.year)
+                        this_str = str(self.report_period_end_date.year)
                         prev_str = str(int(this_str)-1)
                         thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
             tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
@@ -299,6 +311,7 @@ class Finance(BaseParser):
                     indent = indent_label(margin)
                     depth = len(indent.split('-'))
                     if isnum(prev_value):
+                        prioryear = self.report_period_end_date.year - 1
                         values.append({
                             'label': label,
                             'value': prev_value,
@@ -308,7 +321,9 @@ class Finance(BaseParser):
                             'data_type': 'monetary',
                             'name': "dummy",
                             'depth': str(depth),
-                            'consolidated': True
+                            'consolidated': True,
+                            'period': date(year=prioryear, month=self.report_period_end_date.month,
+                                            day=calendar.monthrange(prioryear, self.report_period_end_date.month)[1]).strftime("%Y-%m-%d")
                         })
                     values.append({
                         'label': label,
@@ -319,7 +334,8 @@ class Finance(BaseParser):
                         'data_type': 'monetary',
                         'name': "dummy",
                         'depth': str(depth),
-                        'consolidated': True
+                        'consolidated': True,
+                        'period': self.report_period_end_date.strftime("%Y-%m-%d")
                     })
                 else:
                     # assert label=='' or value=='' or any(['円' in x.text for x in columns]) or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
@@ -331,8 +347,8 @@ class Finance(BaseParser):
                         unit = ''
                     # if value.startswith('当'): #'当連結会計年度' in value
                     if len(values)==0:
-                        this_str = str(self.fiscal_year_end_date.year)
+                        this_str = str(self.report_period_end_date.year)
                         prev_str = str(int(this_str)-1)
                         thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
-        headers = ['label','value','unit','indent','context','data_type','name','depth','consolidated']
+        headers = ['label','value','unit','indent','context','data_type','name','depth','consolidated','period']
         return pd.DataFrame(values, columns=headers).drop_duplicates(subset=['label', 'context'], keep='first')

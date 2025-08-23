@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Literal, Optional, TypedDict
 
 import importlib
 from bs4 import BeautifulSoup, Tag
 import pandas as pd
+from datetime import date
 
 from xbrr.base.reader.xbrl_doc import XbrlDoc
 
@@ -20,9 +21,6 @@ class BaseReader():
     def __init__(self, package:str, xbrl_doc:XbrlDoc):
         self.package = package
         self.xbrl_doc = xbrl_doc
-
-    # def link_to_path(self, link):
-    #     raise NotImplementedError("You have to implement link_to_path method.")
 
     @property
     def custom_roles(self):
@@ -52,16 +50,25 @@ class BaseReader():
     def shrink_depth(self, shrink: pd.Series, base: pd.Series) -> pd.Series:
         raise NotImplementedError("You have to implement shrink_depth method.")
 
-    # @property
-    # def namespaces(self) -> dict[str, str]:
-    #     raise NotImplementedError("You have to implement namespaces method.")
-
     def read_uri(self, uri:str) -> BeautifulSoup:
         "read xsd or xml specifed by uri"
         raise NotImplementedError("You have to implement read_uri method.")
 
-    def read_value_by_role(self, role_link:str, preserve_cal:dict = {}, fix_cal_node:list = [], scope:str = ""):
+    def read_value_by_role(self, role_link:str, fix_cal_node:list = [], scope:str = "", report_start:Optional[date]=None, report_end:Optional[date]=None) -> pd.DataFrame:
         raise NotImplementedError("You have to implement read_value_by_role method.")
+
+    class PreTable(TypedDict):
+        table: str              # financial tables
+        cons_nocons: Literal['ConsolidatedMember','NonConsolidatedMember','ConsNonconsMember','']
+        xlink_role: str         # presentation role
+    class PreHeading(TypedDict):
+        heading: str            # financial figure heading
+        cons_nocons: Literal['Consolidated','NonConsolidated','']
+        xlink_href: str         # TextBlock element name
+
+    @property
+    def role_decision_info(self) -> list[PreTable|PreHeading]:
+        raise NotImplementedError("You have to implement scan method.")
 
     def extract(self, aspect_cls_or_str, property=""):
         if not isinstance(aspect_cls_or_str, str):

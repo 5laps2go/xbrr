@@ -10,6 +10,8 @@ from xbrr.xbrl.reader.element_schema import ElementSchema
 
 class ElementValue(BaseElementValue):
 
+    NaN: 'ElementValue'  # type: ignore
+
     hankaku_dic = str.maketrans('１２３４５６７８９０（）［］','1234567890()[]')
 
     def __init__(self, name:str, reference="",
@@ -89,7 +91,7 @@ class ElementValue(BaseElementValue):
         value_dic = {}
         namespace_dic  = {}
 
-        def read_value(elem):
+        def read_value(elem, nsdecls):
             if elem.prefix == 'link':
                 pass
             elif elem.prefix == 'xbrli':
@@ -103,9 +105,12 @@ class ElementValue(BaseElementValue):
                         period = elem.find("xbrli:endDate").text
                         period_start = elem.find("xbrli:startDate").text
                         context_val = {'id': context_id, 'period': period, 'period_start': period_start}
-                    if elem.find("xbrldi:explicitMember"):
-                        dimension = ','.join([x["dimension"].split(':')[-1] for x in elem.find_all("xbrldi:explicitMember")]) # elem.find("xbrldi:explicitMember")["dimension"]
-                        context_val.update({'dimension':dimension})
+                    if elem.find("xbrli:scenario"):
+                        if elem.find("xbrldi:explicitMember"):
+                            axisdict = {x["dimension"].split(':')[-1]:x.text.split(':')[-1] for x in elem.find_all("xbrldi:explicitMember")}
+                            context_val.update(axisdict)
+                        elif elem.find("jpfr-oe:NonConsolidated"):
+                            context_val.update({"ConsolidatedOrNonConsolidatedAxis":"NonConsolidatedMember"})
                     context_dic[context_id] = context_val
             elif elem.prefix == 'xbrldi':
                 pass
@@ -124,7 +129,7 @@ class ElementValue(BaseElementValue):
 
         for child in xbrl_xml.children:
             if isinstance(child, Tag):
-                read_value(child)
+                read_value(child, nsdecls)
         return context_dic, value_dic, namespace_dic
     
     def to_dict(self) -> dict[str,str|bool|None]:
@@ -143,7 +148,7 @@ class ElementValue(BaseElementValue):
             "consolidated": "NonConsolidated" not in context_id,
             "context": id_parts[0],
             "member": member,
-            "dimension": self.context_ref.get('dimension',''),
+            "dimension": ",".join([x for x in self.context_ref.keys() if x.endswith("Axis")]),
             "period": self.context_ref['period'],
             "period_start": self.context_ref['period_start'] if 'period_start' in self.context_ref else None,
             "label": self.label,
@@ -181,3 +186,6 @@ class ElementValue(BaseElementValue):
         # dimension:
         #   jpcrp_cor:OperatingSegmentsAxis      セグメント
         #   jpigp_cor:ComponentsOfEquityIFRSAxis EquityIFRS詳細
+
+
+ElementValue.NaN = ElementValue('NaN', value='NaN') # ElementValue that holds 'NaN' value
