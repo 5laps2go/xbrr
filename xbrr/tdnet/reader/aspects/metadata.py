@@ -17,7 +17,7 @@ class Metadata(BaseParser):
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI",
             "fiscal_date_start": "jpdei_cor:CurrentFiscalYearStartDateDEI",
             "fiscal_date_end": "jpdei_cor:CurrentFiscalYearEndDateDEI",
-            "_fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI",
+            "_report_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI",
 
             "address": "jpcrp_cor:AddressOfRegisteredHeadquarterCoverPage",
             "phone_number": "jpcrp_cor:TelephoneNumberAddressOfRegisteredHeadquarterCoverPage",
@@ -30,7 +30,7 @@ class Metadata(BaseParser):
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI",
             # "fiscal_date_start": "jpdei_cor:CurrentFiscalYearStartDateDEI",
             "fiscal_date_end": "tse-o-di:FiscalYearEnd",
-            # "fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI",
+            # "report_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI",
             "_annual": "tse-o-di:TypeOfReports-Annual",
             "_firstquarter": "tse-o-di:TypeOfReports-FirstQuarter",
             "_secondquarter": "tse-o-di:TypeOfReports-SecondQuarter",
@@ -54,9 +54,10 @@ class Metadata(BaseParser):
         return year
 
     @property
-    def fiscal_year_end_date(self):
+    def fiscal_year_end_date(self) -> datetime:
         value = self.get_value("fiscal_date_end")
-        date = datetime.strptime(value.value, "%Y-%m-%d") if value else None
+        assert value is not None
+        date = datetime.strptime(value.value, "%Y-%m-%d")
         return date
 
     @property
@@ -66,10 +67,10 @@ class Metadata(BaseParser):
         return month
     
     @property
-    def fiscal_period_kind(self):
-        if "_fiscal_period_kind" in self.tags:
-            assert self._fiscal_period_kind
-            return self._fiscal_period_kind.value
+    def report_period_kind(self):
+        if "_report_period_kind" in self.tags:
+            assert self._report_period_kind
+            return self._report_period_kind.value
         elif self._annual:
             kind = "FY" if self._annual.value=="true"\
                 else "Q1" if self._firstquarter and self._firstquarter.value=="true"\

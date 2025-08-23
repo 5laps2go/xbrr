@@ -1,5 +1,8 @@
+from typing import Optional
+
 import re
 import unicodedata
+from datetime import date, timedelta
 
 from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
@@ -17,25 +20,23 @@ class BaseParser():
         if len(tags) > 0:
             self.tags = tags
             
-    def __getattr__(self, name):
+    def __getattr__(self, name:str) -> Optional[ElementValue]:
         if name in self.tags.keys():
             return self.get_value(name)
         raise NameError(name)
 
-    def normalize(self, text):
+    def normalize(self, text:str) -> str:
         if text is None:
             return ""
         _text = text.strip()
         _text = unicodedata.normalize("NFKC", _text)
         return _text
 
-    def get_value(self, name:str):
+    def get_value(self, name:str) -> Optional[ElementValue]:
         value = self.reader.findv(self.tags[name])
-        # if not value:
-        #     return self.value_class(self.tags[name], value='#NotFound#')
         return value
 
-    def search(self, name:str, pattern:str):
+    def search(self, name:str, pattern:str) -> str:
         value = self.reader.findv(self.tags[name])
         if not value:
             return ''
@@ -53,7 +54,7 @@ class BaseParser():
         return text
 
     def extract_value(self, name, prefix:str="", suffix:str="",
-                      filter_pattern:str=""):
+                      filter_pattern:str="") -> int|float|str:
         value = self.reader.findv(self.tags[name])
         if not value:
             return ''
@@ -75,3 +76,11 @@ class BaseParser():
                 value = float(value)
 
         return value
+
+    @property
+    def fiscal_year_end_date(self) -> date:
+        raise NotImplementedError("You have to implement fiscal_year_end_date.")
+
+    @property
+    def fiscal_year_start_date(self) -> date:
+        raise NotImplementedError("You have to implement fiscal_year_start_date.")

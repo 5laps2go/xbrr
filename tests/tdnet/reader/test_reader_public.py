@@ -46,7 +46,7 @@ class TestReader(unittest.TestCase):
 
     def test_read_value_by_role(self):
         # rol_QuarterlyConsolidatedBalanceSheet                             310030 四半期連結貸借対照表                                
-        bro = self.reader.read_value_by_role('rol_YearToQuarterEndConsolidatedStatementOfIncome')
+        bro = self.reader.read_value_by_role(self.reader.custom_roles['rol_YearToQuarterEndConsolidatedStatementOfIncome'].uri)
         # bro.to_csv(os.path.join(self._dir, 'test_bro.csv'))
         assert bro is not None
         self.assertGreater(len(bro), 0)

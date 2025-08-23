@@ -2,7 +2,8 @@ from typing import Literal, Optional
 
 import re
 import warnings
-from datetime import date, datetime
+import calendar
+from datetime import date, datetime, timedelta
 from pandas import DataFrame
 
 from xbrr.base.reader.base_parser import BaseParser
@@ -11,21 +12,19 @@ from xbrr.xbrl.reader.element_value import ElementValue
 
 
 class Forecast(BaseParser):
-    tse_ed_t_role_candiates = {
-        'fc': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual"], #有価証券報告書,決算短信,業績予想の修正
-        'fc_dividends': ["RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"],   #有価証券報告書,決算短信,配当予想の修正
-        'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
-        'fc_q2ytd': ["InformationQ2YTD"],
+    tse_ed_t_table_candiates: dict[str, list[str]] = {
+        'fc': ["ForecastsTable","InformationAnnualTable"],
+        'fc_dividends': ["DividendsTable","DividendForecastTable"],
+        'fc_q2ytd': ["InformationQ2YTDTable"],
     }
-    tse_t_ed_role_candiates: dict[str, list[str]] = {
-        'fc': ["Consolidated"], #有価証券報告書,決算短信,業績予想の修正
-        'fc_dividends': [],   #有価証券報告書,決算短信,配当予想の修正
-        'fc_test': ["RoleForecasts", "RoleQuarterlyForecasts", "InformationAnnual", "RoleDividends", "RoleQuarterlyDividends", "RoleRevisedDividend"]+["EntityInformation"], # EntityInformation for 2013 sm
+    tse_t_ed_table_candiates: dict[str, list[str]] = {
+        'fc': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
+        'fc_dividends': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
+        'fc_q2ytd': [],
     }
-
 
     def __init__(self, reader:Reader):
-        def gen_fiscal_period_kind(m:re.Match[str]) -> str:
+        def gen_report_period_kind(m:re.Match[str]) -> str:
             quoater = '2' if m.group(1)is not None and m.group(2) is None else m.group(2)
             return 'Q'+quoater if quoater is not None else '0'
         tags = {
@@ -71,38 +70,39 @@ class Forecast(BaseParser):
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
             self.namespace_prefix = 'tse-ed-t'
-            self.role_candidates = self.tse_ed_t_role_candiates
+            self.table_candidates = self.tse_ed_t_table_candiates
         elif "tse-re-t"in reader.namespaces:
             super().__init__(reader, ElementValue, reit_tags)
             self.namespace_prefix = 'tse-re-t'
-            self.role_candidates = self.tse_ed_t_role_candiates
+            self.table_candidates = self.tse_ed_t_table_candiates
         elif "tse-t-ed" in reader.namespaces:
             super().__init__(reader, ElementValue, tse_t_ed_tags)    # for old tdnet
             self.namespace_prefix = 'tse-t-ed'
-            self.role_candidates = self.tse_t_ed_role_candiates
+            self.table_candidates = self.tse_t_ed_table_candiates
 
         if self.document_name is None:
             raise Exception("Unknown titile found!")
 
+        self.__consolidated = None
         dic = str.maketrans('１２３４５６７８９０（）()［　］〔〕[]','1234567890####% %%%%%')
         title = self.document_name.value.translate(dic).strip().replace(' ','')
         m = re.search(r'(第(.)四半期|中間)?.*決算短信([%#]([^%#]*)[%#])?(#(.*)#)?', title)
         if m != None:
-            self.consolidated = '連結' == m.group(6)
-            self.fiscal_period_kind = gen_fiscal_period_kind(m) # don't know which forecast contained
+            self.__consolidated = '連結' == m.group(6)
+            self.report_period_kind = gen_report_period_kind(m) # don't know which forecast contained
             self.accounting_standards = m.group(4)
         elif ('業績予想' in title or '配当予想' in title or '配当の予想' in title):
             m = re.search(r'(第(.)四半期|中間)', title)
             if m is not None:   # 9691: 2024年３月期第２四半期連結累計期間業績予想の修正に関するお知らせ
-                self.fiscal_period_kind = gen_fiscal_period_kind(m)
-                self.consolidated = '連結' in title
+                self.report_period_kind = gen_report_period_kind(m)
+                self.__consolidated = '連結' in title
                 return
             # 業績予想及び配当予想の修正（特別配当）に関するお知らせ
-            self.fiscal_period_kind = '0'
+            self.report_period_kind = '0'
         elif ('剰余金の配当' in title):
-            self.fiscal_period_kind = '0'
+            self.report_period_kind = '0'
         elif ('業績' in title):
-            self.fiscal_period_kind = '0'
+            self.report_period_kind = '0'
         else:
             raise Exception("Unknown titile found!")
 
@@ -145,11 +145,14 @@ class Forecast(BaseParser):
 
     @property
     def reporting_iso_date(self) -> str:
-        report_date = self.reporting_date.value
-        m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
-        if m is None:
-            return self.reader.xbrl_doc.published_date[0].date().isoformat()
-        return date(*(int(x) for x in m.groups())).isoformat()
+        try:
+            report_date = self.reporting_date.value
+            m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
+            if m is not None:
+                return date(*(int(x) for x in m.groups())).isoformat()
+        except NameError:
+            pass
+        return self.reader.xbrl_doc.published_date[0].date().isoformat()
     
     @property
     def forecast_period(self) -> str:
@@ -158,31 +161,57 @@ class Forecast(BaseParser):
         # 'Role(Non)?ConsolidatedInformationAnnual' for '業績予想の修正'
         # 'RoleRevisedDividendForecast' for '配当予想の修正'
 
-        role = self.__find_role_name('fc_test')
-        if len(role) <= 0: return 'Q2'
+        if not self.find_role_name('fc') and not self.find_role_name('fc_dividends'):
+            return 'Q2'
         return 'FY'
 
     @property
-    def fiscal_year_end_date(self) -> datetime:
+    def fiscal_year_start_date(self) -> date:
+        end_date = self.fiscal_year_end_date
+        assert end_date != None
+        next_start_date = end_date + timedelta(days=1)
+        return datetime(year=next_start_date.year-1, month=next_start_date.month, day=next_start_date.day)
+
+    @property
+    def fiscal_year_end_date(self) -> date:
         value = self.get_value("fiscal_date_end")
         assert value is not None
         return datetime.strptime(value.value, "%Y-%m-%d")
 
     @property
-    def fc_q2ytd_period(self) -> str:
-        role = self.__find_role_name('fc_q2ytd')
-        if len(role) <= 0: return ''
-        return 'Q2'
+    def consolidated(self):
+        try:
+            return self.__consolidated if self.__consolidated else self.reader.xbrl_doc.consolidated
+        except LookupError:
+            cons_noncons = set([x['cons_nocons'] for x in self.reader.role_decision_info if 'table' in x])
+            if 'NonConsolidatedMember' in cons_noncons and all([x not in cons_noncons for x in ['ConsolidatedMember','ConsNonconsMember']]):
+                return False
+            return True
 
-    def fc(self,  latest_filter=False) -> Optional[DataFrame]:
-        # year forecast:  'ForecastMemger','(Upper|Lower)Member' in member and 'CurrentYearDuration' = context
-        # q2   forecast:  'ForecastMember','(Upper|Lower)Member' in member and 'CurrentAccumulatedQ2Duration' = context
-        role = self.__find_role_name('fc')
-        if len(role) <= 0: return None
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
+    @property
+    def forecast_year_start_date(self) -> date:
+        start_date = self.fiscal_year_start_date
+        assert start_date != None
+        if self.reader.xbrl_doc.published_date[1] == 'a':
+            start_date = datetime(year=start_date.year+1, month=start_date.month, day=start_date.day)
+        return start_date
 
-        fc = self.reader.read_value_by_role(role_uri)
+    @property
+    def forecast_year_end_date(self) -> date:
+        end_date = self.fiscal_year_end_date
+        assert end_date != None
+        if self.reader.xbrl_doc.published_date[1] == 'a':
+            nextyear = end_date.year + 1
+            end_date = date(year=nextyear, month=end_date.month,
+                            day=calendar.monthrange(nextyear, end_date.month)[1])
+        return end_date
+
+
+    def fc(self,  latest2year=False) -> Optional[DataFrame]:
+        role_uri = self.find_role_name('fc')
+        if not role_uri:
+            return None
+        fc = self.reader.read_value_by_role(role_uri, report_start=self.forecast_year_start_date, report_end=self.forecast_year_end_date)
         if self.namespace_prefix=='tse-t-ed':
             pre_ver = self.reader.presentation_version()
             if pre_ver in ['2012-03-31', '2012-06-30']:
@@ -192,18 +221,16 @@ class Forecast(BaseParser):
             else:
                 assert pre_ver in ['2007-06-30', '2010-03-31']
                 fc = fc.query('name.str.startswith("tse-t-ed:Forecast")').rename(columns={'label':'sub_label', 'parent_2_label': 'label'})
-        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=True)
+        return self.__filter_forecast_items_only(fc)
 
-    def fc_dividends(self, latest_filter=False) -> Optional[DataFrame]:
-        role = self.__find_role_name('fc_dividends')
-        if len(role) <= 0: return None
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
-
-        fc = self.reader.read_value_by_role(role_uri)
-        return fc if fc is None or not latest_filter else self.__filter_accounting_items(fc, consolidate_filter=False)
+    def fc_dividends(self, latest2year=False) -> Optional[DataFrame]:
+        role_uri = self.find_role_name('fc_dividends')
+        if not role_uri:
+            return None
+        fc = self.reader.read_value_by_role(role_uri, report_start=self.forecast_year_start_date, report_end=self.forecast_year_end_date)
+        return self.__filter_forecast_items_only(fc)
     
-    def dividend_per_share(self, latest_filter=False) -> float:
+    def dividend_per_share(self, latest2year=False) -> float:
         import numpy as np
         if self.namespace_prefix=='tse-t-ed':
             try:
@@ -216,7 +243,7 @@ class Forecast(BaseParser):
             except ValueError:
                 pass
             return np.nan
-        fc_df = self.fc_dividends(latest_filter)
+        fc_df = self.fc_dividends(latest2year)
         if fc_df is None or fc_df.empty:
             return np.nan
         query_forecast_figures = 'value!="NaN"&member.str.contains("Forecast")&not member.str.startswith("Annual")'
@@ -224,49 +251,34 @@ class Forecast(BaseParser):
         money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
         return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
 
-    def q2ytd(self, latest_filter=False):
-        role = self.__find_role_name('fc_q2ytd', latest_filter)
-        if len(role) <= 0: return None
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
-
+    def q2ytd(self, latest2year=False):
+        role_uri = self.find_role_name('fc_q2ytd')
+        if not role_uri:
+            return None
         q2ytd = self.reader.read_value_by_role(role_uri)
-        return q2ytd if q2ytd is None or not latest_filter else self.__filter_accounting_items(q2ytd)
+        return q2ytd if q2ytd is None or not latest2year else self.__filter_forecast_items_only(q2ytd)
 
-    def __filter_out_str(self) -> str:
-        filter_out_str = 'NonConsolidated' if self.consolidated\
-            else '(?<!Non)Consolidated'
-        return filter_out_str
+    def find_role_name(self, finance_type:Literal['fc','fc_dividends','fc_q2ytd']) -> Optional[str]:
+        scanstable = [x for x in self.reader.role_decision_info if 'table' in x]
+        for table in self.table_candidates[finance_type]:
+            for scan in scanstable:
+                # fc_dividends may have NonConsolidatedMember even if the finance is ConsolidatedMember.
+                if table in scan['table'] and \
+                    (finance_type=='fc_dividends' or self.consolidated == (scan['cons_nocons']=="ConsolidatedMember")):
+                    # (self.consolidated == (scan['cons_nocons']=="ConsolidatedMember") or scan['cons_nocons']=="ConsNonconsMember"):
+                    return scan['xlink_role']
+        return None
 
-    def __filter_accounting_items(self, data:DataFrame, consolidate_filter=True) -> Optional[DataFrame]:
+    def __filter_forecast_items_only(self, data:DataFrame) -> Optional[DataFrame]:
         if data.size == 0:
             return None
         
-        # select consolidated type
-        if len(data[data['consolidated']]) >= len(data[~data['consolidated']]):
-            data = data[data['consolidated']]
-        else:
-            data = data[~data['consolidated']]
-
-        # eliminate PreviousMember and filter YearDuration
-        current_year_query = '~member.str.contains("Previous")&context.str.contains("Year.*Duration")'
+        # eliminate PreviousMember as previous forecast
+        current_year_query = '~member.str.contains("Previous")'
         filtered = data.query(current_year_query, engine='python')
-        # filter forecat members only
+        # filter forecat members only, (eliminate current result)
         forecast_query = 'value!="NaN"'
         if filtered[filtered['member']!=''].shape[0] > 0:
             forecast_query += '&(member.str.contains("Forecast")|member.str.contains("Lower")|member.str.contains("Upper"))'
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
-
-    def __find_role_name(self, finance_statement:str, latest_filter=False) -> list[str]:
-        def consolidate_type_filter(roles):
-            if not latest_filter:
-                return roles
-            filter_out_str = self.__filter_out_str()
-            return [x for x in roles if not re.search(filter_out_str, x)]
-        custom_role_keys = consolidate_type_filter(list(self.reader.custom_roles.keys()))
-        roles = []
-        for name in self.role_candidates[finance_statement]:
-            roles += [x for x in custom_role_keys if name in x and x not in roles]
-        return roles
-    

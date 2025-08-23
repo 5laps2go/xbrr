@@ -3,8 +3,9 @@ from typing import Optional, Literal, Callable, cast
 
 import importlib.util
 import os
+import math
 import itertools
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from enum import Enum, auto
 from urllib.parse import urljoin
@@ -33,12 +34,14 @@ class Reader(BaseReader):
             else TaxonomyRepository(save_dir)
         self.save_dir = save_dir
 
+        self.context_value_dic:dict[str, list[ElementValue]]
         self._role_dic = {}
         self._context_dic = {}
         self._value_dic:dict[str, list[ElementValue]] = {}
         self._namespace_dic:dict[str, str] = {}
         self.schema_dic:SchemaDicts
         self.schema_tree:SchemaTree
+        self._scans_presentation:list[BaseReader.PreTable|BaseReader.PreHeading] = []
 
         self.logger = getLogger(__name__)
         self.debug_print = []
@@ -84,10 +87,10 @@ class Reader(BaseReader):
             elemschema = xsd_dic.get(element, ElementSchema(name=element, reference=link)) # avoid reference error
         return elemschema
 
-    def get_role(self, role_name) -> RoleSchema:
-        if '/' in role_name:
-            role_name = role_name.rsplit('/', 1)[-1]
-        return self.custom_roles[role_name]
+    # def get_role(self, role_name) -> RoleSchema:
+    #     if '/' in role_name:
+    #         role_name = role_name.rsplit('/', 1)[-1]
+    #     return self.custom_roles[role_name]
 
     def find_xsduri(self, namespace:str) -> str:
         """find xsd uri by namespace """
@@ -115,7 +118,65 @@ class Reader(BaseReader):
         laburi = self.schema_tree.find_kind_uri('lab', xsduri)
         return laburi
 
-    def read_schema_by_role(self, role_name, preserve_cal:dict={}, fix_cal_node:list[str]=[]):
+    @property
+    def role_decision_info(self) -> list[BaseReader.PreTable|BaseReader.PreHeading]:
+        if len(self._scans_presentation)==0:
+            self._scans_presentation = self.__scan_presentation()
+        return self._scans_presentation
+    
+    def __scan_presentation(self) -> list[BaseReader.PreTable|BaseReader.PreHeading]:
+        scans:list[BaseReader.PreTable|BaseReader.PreHeading] = []
+        linkbase = self.xbrl_doc.default_linkbase
+        for docuri in self.schema_tree.linkbaseRef_iterator(linkbase['doc']):
+            if docuri.startswith('http'):
+                # for deciding presentation role, skip taxonomy presentation linkbases
+                continue
+            doc = self.read_uri(docuri)
+            link_node, arc_node = self.get_linkbase_tag(doc, linkbase['link_node'], linkbase['arc_node'])
+            for link in doc.find_all(link_node):
+                assert isinstance(link, Tag)
+                role_name = cast(str,link["xlink:role"]).split('#')[-1]
+                # find Axis
+                table = ''
+                cons_noncons = ''
+                locs_after_cons = 5
+                for loc in link.find_all("loc"):
+                    if table and cons_noncons and locs_after_cons <= 0:
+                        break
+                    assert isinstance(loc, Tag)
+                    href = cast(str,loc["xlink:href"])
+                    item = href.split("#")[-1].split("_")[-1]
+                    if item.endswith("Table"):
+                        table = item
+                    if item.endswith("ConsolidatedAxis"):
+                        pass
+                    if item.endswith("ConsolidatedMember"):
+                        cons_noncons = item if not cons_noncons else "ConsNonconsMember"
+                    if cons_noncons:
+                        locs_after_cons = locs_after_cons - 1
+                    # tse-t-ed="http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30
+                    if item.endswith("IncomeStatementsInformationAbstract"):
+                        table = item
+                        cons_noncons = role_name.split('/')[-1] + "Member"
+                    # role_name=="http://www.xbrl.tdnet.info/jp/tse/tdnet/role/RoleAttachedDocument"
+                    #             US-GAAP? http://disclosure.edinet-fsa.go.jp/role/jpcrp/rol_CabinetOfficeOrdinanceOnDisclosureOfCorporateInformationEtcFormNo3AnnualSecuritiesReport
+                    if href.endswith("TextBlock"):
+                        tolabel = cast(str,loc["xlink:label"])
+                        if not (arc:=link.find(arc_node, attrs={"xlink:to":tolabel})): continue
+                        assert isinstance(arc, Tag)
+                        headingloc = link.find("loc", attrs={"xlink:label": arc["xlink:from"]})
+                        assert isinstance(headingloc, Tag)
+                        heading = cast(str,headingloc["xlink:href"]).split("#")[-1].split("_")[-1]
+                        if not heading.endswith("Heading"): continue
+                        blockitem = href.split("#")[-1]
+                        consolidated = "NonConsolidated" if "NonConsolidated" in heading else "Consolidated" if "Consolidated" in heading else ""
+                        if consolidated: heading = heading.split(consolidated)[-1]
+                        scans.append(Reader.PreHeading(heading=heading, cons_nocons=consolidated, xlink_href=blockitem))
+                scans.append(Reader.PreTable(table=table, cons_nocons=cons_noncons, xlink_role=role_name)) # type: ignore
+        return scans
+
+    def read_schema_by_role(self, role_link:str, fix_cal_node:list[str]=[], report_start:Optional[date]=None, report_end:Optional[date]=None) -> DataFrame:
+        assert role_link.startswith("http"), "role must be full uri: {}".format(role_link)
         if not self.xbrl_doc.has_schema:
             raise Exception("XBRL directory is required.")
 
@@ -123,55 +184,110 @@ class Reader(BaseReader):
         linkbase = self.xbrl_doc.default_linkbase
         self.logger.debug("-------------- Section presentation -----------------")
         for docuri in self.schema_tree.linkbaseRef_iterator(linkbase['doc']):
-            self.make_node_tree(nodes, role_name, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
-        context_vdic = self.context_value_dic(role_name, nodes)
-        self.restructure_presentation(nodes, context_vdic)
+            self.make_node_tree(nodes, role_link, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
+        self.context_value_dic = self.select_value_dic(nodes, role_link)
+        current_vdic = self.current_value_dic(report_start, report_end)
+        self.restructure_presentation(nodes, current_vdic)
 
         if list(self.schema_tree.linkbaseRef_iterator('cal')) != []:
             self.logger.debug("-------------- Section calculation ------------------")
-            preserve_parents = set(sum(preserve_cal.values(),[]))
             for docuri in self.schema_tree.linkbaseRef_iterator('cal'):
-                self.make_node_tree(nodes, role_name, docuri, "calculationLink", "calculationArc", "summation-item")
+                self.make_node_tree(nodes, role_link, docuri, "calculationLink", "calculationArc", "summation-item")
             if fix_cal_node:                
-                self.patch_calc_node_tree(context_vdic, nodes, preserve_cal, fix_cal_node)
+                self.patch_calc_node_tree(current_vdic, nodes, fix_cal_node)
         return self.flatten_to_schemas(nodes)
     
-    def context_value_dic(self, role_name:str, nodes:dict[str, Node]) -> dict[str,ElementValue]:
-        def most_used_current_context(nodes):
-            counter:dict[str,int] = {}
-            for name in [n for n in nodes if n in self._value_dic and self._value_dic[n][0].data_type=='monetary']:
-                for context in [x.context_ref['id'] for x in self._value_dic.get(name,[])]:
-                    count = counter.get(context,0)
-                    counter[context] = count + 1
-            if re.search('(?<!Non)Consolidated', role_name):
-                consolidated_counter = dict(filter(lambda x: not re.search('NonConsolidated', x[0]), counter.items()))
-                if consolidated_counter: counter = consolidated_counter
-            not_prior_counter = dict(filter(lambda x: not x[0].startswith('Prior'), counter.items()))
-            context = max(not_prior_counter, key=not_prior_counter.get) if not_prior_counter else max(counter, key=counter.get) if counter else '' # type: ignore
-            return context
-        def select_context(vlist, context):
-            list = [x for x in vlist if x.context_ref.get('id','')==context and x.value!='NaN' and x.unit!=''] # isTextBlock: x.unit!=''
-            return list[0] if list else None
-        context = most_used_current_context(nodes)
-        context_value_dic = {k:vv for k,v in self._value_dic.items() if k in nodes and (vv:=select_context(v,context))}
-        self.prepare_epsilon(context_value_dic)
+    def select_value_dic(self, nodes:dict[str, Node], role_link:str) -> dict[str, list[ElementValue]]:
+        # key: element name, which includes namespace prefix following _
+        # list[ElementValue]: Current, Prior1, Prior2 order of ElementValues in this role context
+        def axis_member(dict:dict[str,str], value:ElementValue) -> bool:
+            # assign consolidatedMember at the case not provided cons-noncons Axis, if it is required
+            contexts = {k:v for k,v in value.context_ref.items() if k.endswith("Axis")}
+            if (consaxiss:=[k for k in dict if k.startswith("Consolidated")]):
+                if not any(["Consolidated" in k for k in contexts]):
+                    contexts[consaxiss[0]] = "ConsolidatedMember"
+            if set(dict.keys()) == set([x for x in contexts.keys() if x.endswith("Axis")]):
+                for key in dict:
+                    if contexts[key] not in dict[key]:
+                        return False
+                # non-axis comparison like IncomeQuarterly, IncomeYTD
+                if any([period in role_link for period in ["YearToQuarterEnd","QuarterPeriod"]]) and "QuarterDuration" in value.context_ref['id']:
+                    return False
+                if any([period in role_link for period in ["QuarterPeriod","IncomeQuater"]]) and "YTDDuration" in value.context_ref['id']:
+                    return False
+                return True
+            return False
+        axisdict = {}
+        for name in [nm for nm in nodes if nm.endswith("Member")]:
+            member = name.split('_')[-1]
+            if not (axiss:=[n for n in nodes[name].get_parent() if n.name.endswith("Axis")]): continue
+            axis = axiss[0].name.split('_')[-1]
+            axisdict[axis] = axisdict.get(axis,[]) + [member]
+        # old style presentation does not have cons-noncons Axis, but value context may have cons-noncons Axis.
+        if not axisdict and role_link.startswith("http://info.edinet-fsa.go.jp/jp/fr/gaap/role/"):
+            consaxis = "ConsolidatedOrNonConsolidatedAxis" if 'edinet' in role_link else "ConsolidatedNonconsolidatedAxis"
+            axisdict[consaxis] = "NonConsolidatedMember" if "NonConsolidated" in role_link else "ConsolidatedMember"
+
+        context_value_dic:dict[str, list[ElementValue]] = {}
+        for key in nodes:
+            if key not in self._value_dic or not (values:=[v for v in self._value_dic[key] if axis_member(axisdict,v)]):
+                continue
+            context_value_dic[key] = sorted(values, key=lambda x: x.context_ref['id']) # Current, Prior1, Prior2 order
         return context_value_dic
 
-    def prepare_epsilon(self, context_vdic:dict[str,ElementValue]):
-        moneys = [x for x in context_vdic.values() if x.data_type=='monetary']
+    def current_value_dic(self, report_start:Optional[date]=None, report_end:Optional[date]=None) -> dict[str,ElementValue]:
+        # filter context by period_start and period_end
+        def filter_period(vlist:list[ElementValue]) -> Optional[ElementValue]:
+            for v in vlist:
+                if 'period_start' in v.context_ref:
+                    if v.context_ref['period_start'] == period_start and \
+                        v.context_ref['period'] == period_end:
+                        return v
+                elif v.context_ref['period'] == period_end: # and v.value!='NaN' and v.unit!='':
+                    return v
+            return None
+
+        current_vdic:dict[str,ElementValue] = {}
+        context_ids = set([v.context_ref['id'] for vlist in self.context_value_dic.values() for v in vlist])
+        if any(['period_start' in self._context_dic[x] for x in context_ids]):
+            context_ids = sorted([x for x in context_ids if 'period_start' in self._context_dic[x]], key=lambda x: self._context_dic[x]['period_start'], reverse= False)
+        sorted_context_ids = sorted(context_ids, key=lambda x: self._context_dic[x]['period'], reverse=True)
+        assert sorted_context_ids, "no context ids found"
+
+        period_start = "2009-01-01"
+        if 'period_start' in self._context_dic[sorted_context_ids[0]]:
+            if report_start is not None and report_start.strftime("%Y-%m-%d") != self._context_dic[sorted_context_ids[0]]['period_start']:
+                self.logger.info("report_start {} does not match period_start {}: {}".format(
+                    report_start.strftime("%Y-%m-%d"), self._context_dic[sorted_context_ids[0]]['period_start'], sorted_context_ids))
+            if sorted_context_ids[0].startswith('Prior'):
+                assert False
+            period_start = self._context_dic[sorted_context_ids[0]]['period_start']
+        if report_end is not None and report_end.strftime("%Y-%m-%d") != self._context_dic[sorted_context_ids[0]]['period']:
+            self.logger.info("report_end {} does not match period_end {}: {}".format(
+                report_end.strftime("%Y-%m-%d"), self._context_dic[sorted_context_ids[0]]['period'], sorted_context_ids))
+            if sorted_context_ids[0].startswith('Prior'):
+                assert False
+        period_end = self._context_dic[sorted_context_ids[0]]['period']
+        
+        current_vdic = {k:v for (k,vlist) in self.context_value_dic.items() if (v:=filter_period(vlist))}
+        self.prepare_epsilon(current_vdic)
+        return current_vdic
+
+    def prepare_epsilon(self, current_vdic:dict[str,ElementValue]):
+        moneys = [x for x in current_vdic.values() if x.data_type=='monetary' and x.value!='NaN']
         if not moneys:
             Node.epsilon_value = 0
             return
         eps1 = min([epsilon(float(x.value)) for x in moneys])
 
-        decimals = set([x.decimals for x in moneys])
-        eps2 = epsilon2(list(decimals)[0])
+        # decimals = set([x.decimals for x in moneys if x.decimals!=''])
+        # eps2 = epsilon2(list(decimals)[0])
         # assert eps1 == eps2
         Node.epsilon_value = eps1
     
-    def restructure_presentation(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
+    def restructure_presentation(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
         self.clean_deleted_presentation(nodes)
-        self.mark_subtotal_as_parent(nodes, context_vdic)
+        self.mark_subtotal_as_parent(nodes, current_vdic)
 
     def clean_deleted_presentation(self, nodes:dict[str,Node]):
         for name,node in nodes.items():
@@ -182,20 +298,20 @@ class Reader(BaseReader):
         for name,node in nodes.items():
             node.omit_deleted_derives()
 
-    def mark_subtotal_as_parent(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
+    def mark_subtotal_as_parent(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
         parent_children = {}
         for node in nodes.values():
             if node.parent_name is None: continue
             parent_children[node.parent_name] = parent_children.get(node.parent_name, []) + [node]
         for name in parent_children:
-            if name not in context_vdic: continue
+            if name not in current_vdic: continue
             if len(parent_children[name]) >= 1:
-                nodes[name].mark_subtotal(parent_children[name], context_vdic)
+                nodes[name].mark_subtotal(parent_children[name], current_vdic)
 
-    def patch_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], preserve_cal:dict, fix_cal_node:list[str]):
+    def patch_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], fix_cal_node:list[str]):
         self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
 
-        if self.validate_calc_node_tree(context_value_dic, nodes, preserve_cal.keys()):
+        if self.validate_calc_node_tree(context_value_dic, nodes):
             return
         
         # preserve_parents = set(sum(preserve_cal.values(),[]))
@@ -207,7 +323,7 @@ class Reader(BaseReader):
         self.fix_extra_calc_link(nodes, fix_cal_node, context_value_dic)
         self.fix_missing_calc_link(nodes, fix_cal_node, context_value_dic)
 
-    def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], cal_keys) -> bool:
+    def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node]) -> bool:
         has_derived = False
         leaf_nodes = []
         for name in nodes:
@@ -218,16 +334,16 @@ class Reader(BaseReader):
                 ind = leaf_nodes.index(nodes[name])
                 if ind+1 < len(leaf_nodes) and not leaf_nodes[ind+1].no_derive():
                     if 'Attributable' in name: continue # jppfs_cor_ProfitLossAttributableToOwnersOfParent is 内訳 of ProfitLoss
-                    print('found: ', name)
+                    self.logger.debug("invalid calc node tree caused by {}".format(name))
                     return False
             if nodes[name].has_derived():
                 has_derived = True
                 if not nodes[name].validate(context_value_dic):
-                    print('found: ', name)
+                    self.logger.debug("invalid calc node tree caused by {}".format(name))
                     return False
         return has_derived
 
-    def make_node_tree(self, nodes:dict[str,Node], role_name:str, docuri:str, link_node:str, arc_node:str, arc_role:str):
+    def make_node_tree(self, nodes:dict[str,Node], role_link:str, docuri:str, link_node:str, arc_node:str, arc_role:str):
         def get_name(loc):
             return loc["xlink:href"].split("#")[-1]
         def get_absxsduri(docuri, xsduri):
@@ -243,13 +359,13 @@ class Reader(BaseReader):
             if not isinstance(loc, Tag): continue
             locs[loc["xlink:label"]] = loc
 
-        for role in doc.find_all(link_node, {"xlink:role": self.get_role(role_name).uri}):
+        for role in doc.find_all(link_node, {"xlink:role": role_link}):
             if not isinstance(role, Tag): continue
             for i, arc in enumerate(role.find_all(arc_node, recursive=False)):
                 if not isinstance(arc, Tag): continue
                 assert str(arc["xlink:arcrole"]).split('/')[-1] in ['parent-child','summation-item','domain-member', 'dimension-domain', 'all', 'hypercube-dimension']
-                if not str(arc["xlink:arcrole"]).endswith(arc_role):
-                    continue
+                # if not str(arc["xlink:arcrole"]).endswith(arc_role):
+                #     continue
 
                 arctype = arc_node.split(':')[-1]
                 parent = locs[arc["xlink:from"]]
@@ -293,14 +409,14 @@ class Reader(BaseReader):
                 if type=='cal':
                     nodes[name].omit_deleted_derives()
 
-    def fix_missing_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], context_vdic:dict[str,ElementValue]):
+    def fix_missing_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], current_vdic:dict[str,ElementValue]):
         def make_missing_link(derived, orphans):
             if derived is None or not orphans:
                 return
-            derived_value, diff, epsilon = derived.cvalue(context_vdic)
+            derived_value, diff, epsilon = derived.cvalue(current_vdic)
             if abs(diff) < epsilon and (not orphans or (nmmatch(orphans[0].name, fix_cal_node))): # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 return
-            orphan_values = [x.cvalue(context_vdic)[0] for x in orphans]
+            orphan_values = [cvalue0(x, current_vdic) for x in orphans]
             for pat in [[1], [-1], [1,1], [-1,1], [-1,0,1], [-1,1,1], [0,-1,1], [-1,-1,1], [1,-1,1],
                         [-1,0,0,1], [1,0,0,1], [-1,-1,-1,1],    # -1,-1,-1,1:85950 ジャフコ　　　　　　　　　　2013-04-19 15:15:00: 平成25年3月期 決算短信
                         [-1,1,-1,-1,1], [1,-1,1,-1,1], [-1,1,1,-1,1], [-1,1,1,1,-1,1], [1,-1,1,-1,1,-1,-1,1]]: # [1,-1,1,-1,1,-1,-1,1]:2282:2022-05-10
@@ -327,8 +443,8 @@ class Reader(BaseReader):
         def test_branchs(node, cal_nodes):
             return node in cal_nodes and not node.no_derive()
 
-        cal_nodes = [v for k,v in nodes.items() if k in context_vdic and nmmatch(k, fix_cal_node) and k in self._value_dic]
-        candidates = [v for k,v in nodes.items() if test_branchs(v, cal_nodes) or v.need_to_derive_value(context_vdic, fix_cal_node)]
+        cal_nodes = [v for k,v in nodes.items() if k in current_vdic and nmmatch(k, fix_cal_node)]
+        candidates = [v for k,v in nodes.items() if test_branchs(v, cal_nodes) or v.need_to_derive_value(current_vdic, fix_cal_node)]
         ordered_candidates = sorted(candidates, reverse=True, key=lambda x: x.derivation_order)
         for missing in ordered_candidates:
             if nmmatch(missing.name, fix_cal_node):
@@ -336,16 +452,16 @@ class Reader(BaseReader):
                 orphans = ordered_candidates[ordered_candidates.index(derived)+1:]
                 make_missing_link(derived, orphans)
     
-    def fix_extra_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], context_vdic:dict[str,ElementValue]):
+    def fix_extra_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], current_vdic:dict[str,ElementValue]):
         def eliminate_extra_link(node):
-            derives = sorted([v for v in node.get_derived() if v.name in context_vdic], reverse=True, key=lambda x: x.derivation_order)
-            node_value, diff, epsilon = node.cvalue(context_vdic)
+            derives = sorted([v for v in node.get_derived() if v.name in current_vdic], reverse=True, key=lambda x: x.derivation_order)
+            node_value, diff, epsilon = node.cvalue(current_vdic)
             if abs(diff) < epsilon or node_value+diff==0:
-                for remove in node.validate_or_remove_derive_children(context_vdic):
+                for remove in node.validate_or_remove_derive_children(current_vdic):
                     self.logger.debug("#validate_or_remove_derive_children: {} X-> all".format(remove.name))
                 return
             # found extra derives
-            derives_values = [v.get_weight(node) * float(context_vdic[v.name].value) for v in derives]
+            derives_values = [v.get_weight(node) * float(current_vdic[v.name].value) for v in derives]
             for pat in [(1,0),(0,0,1,1,1,1),(1,1),(1,0,1),(1,1,1),(1,0,0,1),(1,0,0,0,1),(1,1,0,1,1),(1,0,0,0,0,1),(0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)]:
                 vs = [pat[i]*derives_values[i] for i in range(min(len(pat),len(derives)))]
                 if abs(sum(vs)-node_value) < epsilon:
@@ -365,31 +481,31 @@ class Reader(BaseReader):
         for node in sorted(cal_nodes, reverse=True, key=lambda x: x.derivation_order):
             eliminate_extra_link(node)
 
-    def fix_calc_link_for_parent_subtotal(self, nodes:dict[str, Node], context_vdic:dict[str,ElementValue]):
+    def fix_calc_link_for_parent_subtotal(self, nodes:dict[str, Node], current_vdic:dict[str,ElementValue]):
         def test_lineitems(name, children):
             for parent_name in [name] + [x.parent_name for x in children]:
                 if any([parent_name.endswith(x) for x in ['StatementOfIncomeLineItems', 'StatementsOfIncomeAbstract', 'ProfitLossFromContinuingOperationsIFRS']]): # StatementsOfIncomeAbstract:7971:2014-02-07, ProfitLossFromContinuingOperationsIFRS:6191:2021-11-12
                     return True
             return False
-        parent_subtotal = self.subtotal_children(nodes, context_vdic)
+        parent_subtotal = self.subtotal_children(nodes, current_vdic)
         for parent_name,children in parent_subtotal.items():
-            if context_vdic[parent_name].unit not in ['JPY','USD'] or test_lineitems(parent_name, children):
+            if current_vdic[parent_name].unit not in ['JPY','USD'] or test_lineitems(parent_name, children):
                 continue
             # children make subtotal
             parent_node = nodes[parent_name]
-            if parent_node.validate(context_vdic):
+            if parent_node.validate(current_vdic):
                 continue
             # parent derives one of children:  64690 放電精密　　　　　　　　　　2012-04-03 16:30:00: 平成24年2月期 決算短信[日本基準](連結)
             if parent_node.is_subtotal() and parent_node.get_derive() in children:
                 parent_node.remove_subtotal()
                 continue
-            if len(children)>1 and nodes[parent_name].compare_subtotal(children, context_vdic)==0:
+            if len(children)>1 and nodes[parent_name].compare_subtotal(children, current_vdic)==0:
                 for child in [x for x in children if not x.has_derive(nodes[parent_name])]:
                     self.logger.debug("#{} --> {}:w{}".format(parent_name, child.name,'1'))
                     child.add_derive(nodes[parent_name], '', '0', '1', str(1))
                 continue
 
-    def subtotal_children(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]) -> dict[str,list[Node]]:
+    def subtotal_children(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]) -> dict[str,list[Node]]:
         _parent_children, parent_children = {}, {}
         for node in nodes.values():
             if node.parent_name is None: continue
@@ -397,12 +513,12 @@ class Reader(BaseReader):
         for name in _parent_children:
             sortedlist = sorted(_parent_children[name], key=lambda x: x.order)
             subtotal = sortedlist[-1]
-            if name in context_vdic or subtotal.name in context_vdic:
+            if name in current_vdic or subtotal.name in current_vdic:
                 parent_children[name] = sortedlist
 
         subtotal_children = {}
         for name in parent_children:
-            if name in context_vdic:
+            if name in current_vdic:
                 subtotal_children[name] = parent_children[name]
             else:
                 subtotal = parent_children[name].pop(-1)
@@ -414,14 +530,14 @@ class Reader(BaseReader):
                     parent_children[nodes[name].parent_name].insert(idx, subtotal)
         return subtotal_children
 
-    def eliminate_non_value_calc_leaf(self, nodes:dict[str,Node], context_vdic:dict[str,ElementValue]):
+    def eliminate_non_value_calc_leaf(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
         def no_current_value(name):
-            return context_vdic.get(name, 'NaN')=='NaN'  # 2813:2013-05-13 all([x.context_ref['id'].startswith('Prior') or x.value=='NaN'
+            return current_vdic.get(name, ElementValue.NaN).value == 'NaN'  # 2813:2013-05-13 all([x.context_ref['id'].startswith('Prior') or x.value=='NaN'
         # nodes preserves child, parent order (derived, derives order)
         for name in nodes:
             n = nodes[name]
             while n is not None and n.no_derived() and not n.no_derive() \
-                 and (n.name not in context_vdic or no_current_value(n.name)):
+                 and n.name not in current_vdic:
                 derive = n.get_derive()
                 n.remove_derive_all()
                 n = derive
@@ -438,6 +554,8 @@ class Reader(BaseReader):
         for name0 in nodes:
             n = nodes[name0]
             if n.element.abstract=='true':
+                continue
+            if n.is_leaf and name0 not in self.context_value_dic:
                 continue
             item = {}
             parents = n.get_ascendants()
@@ -469,8 +587,7 @@ class Reader(BaseReader):
 
         return schemas
 
-
-    def read_value_by_role(self, role_link:str, preserve_cal:dict = {}, fix_cal_node:list = [], scope:str = "") -> DataFrame:
+    def read_value_by_role(self, role_link:str, fix_cal_node:list = [], scope:str = "", report_start:Optional[date]=None, report_end:Optional[date]=None) -> DataFrame:
         """Read XBRL values in a dataframe which are specified by role and/or context.
 
         Arguments:
@@ -504,20 +621,20 @@ class Reader(BaseReader):
                 results.append(item)
             return results
 
-        schemas = self.read_schema_by_role(role_link, preserve_cal, fix_cal_node)
+        schemas = self.read_schema_by_role(role_link, fix_cal_node, report_start, report_end)
         if len(schemas) == 0:
             return pd.DataFrame()
-
+        
         xbrl_data = []
         for i, row in schemas.iterrows():
             tag_name = row['name']
             row['name'] = ':'.join(tag_name.rsplit('_', 1))
-            if tag_name not in self._value_dic:
+            if tag_name not in self.context_value_dic:
                 xbrl_data += calc_value(row, xbrl_data)
                 continue
 
             results = []
-            for value in sorted(self._value_dic[tag_name], reverse=True, key=lambda x: x.context_ref['id']):
+            for value in sorted(self.context_value_dic[tag_name], reverse=True, key=lambda x: x.context_ref['id']):
                 if not value.context.startswith(scope):
                     continue
                 item = row.to_dict()
@@ -773,38 +890,36 @@ class Node():
     def omit_deleted_derives(self):
         return
     
-    def cvalue(self, context_vdic:dict[str,ElementValue]) -> tuple[float,float,int]:
-        value = cvalue(self, context_vdic)
+    def cvalue(self, current_vdic:dict[str,ElementValue]) -> tuple[float,float,int]:
+        value = cvalue(self, current_vdic)
         to_target = self.clinks.active_dst_nodes()
-        calc_values = [(val if (val:=v.get_weight(self)) else 1.0) * cvalue(v, context_vdic) for v in to_target]
+        calc_values = subtotal(self, to_target, current_vdic)
         diff = sum(calc_values) - value
-        epsilon = epsvalue(context_vdic.get(self.name,None), calc_values)
+        epsilon = epsvalue(current_vdic.get(self.name,None), calc_values)
         return value, diff, epsilon
     
-    def validate(self, context_vdic:dict[str, ElementValue]) -> bool:
-        value, diff, epsilon = self.cvalue(context_vdic)
+    def validate(self, current_vdic:dict[str, ElementValue]) -> bool:
+        value, diff, epsilon = self.cvalue(current_vdic)
         return abs(diff) < epsilon
     
-    def validate_or_remove_derive_children(self, context_vdic:dict[str, ElementValue]):
+    def validate_or_remove_derive_children(self, current_vdic:dict[str, ElementValue]):
         removed = []
         for node in self.clinks.active_dst_nodes():
-            value,diff,e = node.cvalue(context_vdic)
+            value,diff,e = node.cvalue(current_vdic)
             if abs(diff) > e:
                 if node.remove_derive_children():
                     removed.append(node)
         return removed
 
-    def compare_subtotal(self, children:list[Node], context_vdic:dict[str, ElementValue]) -> int:
-        def f(v:Node, target:Node) -> float:
-            return val if (val:=v.get_weight(target)) else 1.0
-        if context_vdic[self.name].unit not in ['JPY','USD']: # TODO: it must be len()!=3 or format!='numdotdecimals'
+    def compare_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue]) -> int:
+        if current_vdic[self.name].unit not in ['JPY','USD']: # TODO: it must be len()!=3 or format!='numdotdecimals'
             return False
-        result = cvalue(self, context_vdic)
-        calc_values = [f(v, self) * cvalue(v, context_vdic) for v in children]
+        result = cvalue(self, current_vdic)
+        calc_values = subtotal(self, children, current_vdic)
         sum_value = sum(calc_values)
-        if abs(sum_value - result) < epsvalue(context_vdic.get(self.name,None), calc_values):
+        if abs(sum_value - result) < epsvalue(current_vdic.get(self.name,None), calc_values):
             return 0
-        if sum_value - result >= epsvalue(context_vdic.get(self.name,None), calc_values):
+        if sum_value - result >= epsvalue(current_vdic.get(self.name,None), calc_values):
             return 1
         return -1
 
@@ -852,20 +967,20 @@ class Node():
     def no_derive(self) -> bool:
         return len(self.clinks.active_src) == 0
 
-    def need_to_derive_value(self, context_vdic:dict[str, ElementValue], fix_cal_node:list[str]):
+    def need_to_derive_value(self, current_vdic:dict[str, ElementValue], fix_cal_node:list[str]):
         parents = self.get_parent()
         # omit quasi subtotal that subtotal is not fix_cal_node
         if self.is_subtotal_fewer_children() and not nmmatch(parents[0].name, fix_cal_node): # requires not nmmatch: 64180 日金銭　　　　　　　　　　　2014-02-12 15:30:00: 平成26年3月期 第3四半期決算短信
             return False
-        return self.no_derive() and self.name in context_vdic
+        return self.no_derive() and self.name in current_vdic
 
     def has_derive_chain(self, preserve_parent_names:list[str]) -> bool:
         if not self.get_derive_chain():
             return False
         return any([t(x.name) in preserve_parent_names for x in self.get_derive_chain()])
     
-    def mark_subtotal(self, children:list[Node], context_vdic:dict[str, ElementValue]):
-        comparison = self.compare_subtotal(children, context_vdic)
+    def mark_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue]):
+        comparison = self.compare_subtotal(children, current_vdic)
         plinks = self.plinks.active_src         # TODO: it is not necessary
         if not plinks:
             return
@@ -1000,12 +1115,16 @@ def cvalue(node:Node, vdic) -> float:
     if node.name not in vdic or '円' in vdic[node.name].value:
         return 0.
     return float(vdic[node.name].value)
+def cvalue0(node:Node, vdic) -> float:
+    if node.name not in vdic or vdic[node.name].value=='NaN' or '円' in vdic[node.name].value:
+        return 0.
+    return float(vdic[node.name].value)
 
-def subtotal(target, children, vdic) -> float:
+def subtotal(target, children, vdic) -> list[float]:
     def f(v, target):
         return v.get_weight(target) if v.get_weight(target) is not None else 1.0
     calc_values = [f(v, target) * cvalue(v, vdic) for v in children]
-    return sum(calc_values)
+    return [v for v in calc_values if not math.isnan(v)]
 
 def t(name:str) -> str:
     return name.split('_')[-1]

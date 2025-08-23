@@ -3,6 +3,7 @@ import glob
 import os
 import re
 from datetime import datetime
+from typing import cast
 
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag, PageElement
@@ -114,7 +115,7 @@ class Doc(XbrlDoc):
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
     @property
-    def fiscal_year_date(self) -> datetime:
+    def report_period_end_date(self) -> datetime:
         if 'public' == self.xbrl_kind:
             # Attachment/tse-acedjpfr-36450-2021-05-31-01-2021-07-14
             #             0  1          2     3   4  5  6   7   8  9
@@ -159,7 +160,7 @@ class Doc(XbrlDoc):
             #          0      1       2         3 
             v = os.path.basename(self.file_spec).split('-')
             if v[1] in ['rrfc','rvfc','rvdf']:  # rrfc	配当金修正, rvfc	業績予想修正, rvdf	配当予想のお知らせ
-                return True
+                raise LookupError("no information for consolidated identification")
             return test_consolidated(v[1][1])
         else:
             raise FileNotFoundError("No Attachment or Summary folder found.")
@@ -324,4 +325,5 @@ class Doc(XbrlDoc):
         else:
             infile = self.file_spec+"-ixbrl.htm"
             translate_ixbrl(infile, xbrlbs)
+        cast(Tag,xbrlbs.find('separator')).extract() # remove supporting tag
         return xbrlbs

@@ -32,8 +32,8 @@ class TestForecast(unittest.TestCase):
         feature = self.reader.extract(Forecast).consolidated
         self.assertTrue(feature)
 
-    def test_fiscal_period_kind(self):
-        feature = self.reader.extract(Forecast).fiscal_period_kind
+    def test_report_period_kind(self):
+        feature = self.reader.extract(Forecast).report_period_kind
         self.assertEqual(feature, "Q1")
 
     def test_roles(self):

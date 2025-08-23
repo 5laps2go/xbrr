@@ -1,3 +1,6 @@
+from typing import Optional, Literal, Callable, cast
+
+from datetime import date, datetime
 import collections
 import importlib
 import importlib.util
@@ -21,79 +24,112 @@ class Finance(BaseParser):
             "segment_information": "jpcrp_cor:NotesSegmentInformationEtcConsolidatedFinancialStatementsTextBlock",
             "real_estate_for_lease": "jpcrp_cor:NotesRealEstateForLeaseEtcFinancialStatementsTextBlock",
             "accounting_standards": "jpdei_cor:AccountingStandardsDEI", # 会計基準 from metadata
-            "fiscal_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
+            "report_period_kind": "jpdei_cor:TypeOfCurrentPeriodDEI", # 会計期間 from metadata
         }
 
         super().__init__(reader, ElementValue, tags)
 
-    def bs(self, ifrs=False):
-        pre = {}
-        cal = {}
-        role = self.__find_role_name('bs')
-        if len(role) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfFinancialPosition","BalanceSheet"])
+    @property
+    def consolidated(self):
+        cons_noncons = set([x['cons_nocons'] for x in self.reader.role_decision_info if 'table' in x])
+        if 'NonConsolidatedMember' in cons_noncons and all([x not in cons_noncons for x in ['ConsolidatedMember','ConsNonconsMember']]):
+            return False
+        return True
+
+    @property
+    def fiscal_period_end_date(self) -> date:
+        raise NotImplementedError("You have to implement fiscal_period_end_date.")
+
+    def bs(self, latest2year=False):
+        role_uri = self.find_role_name('bs')
+        if not role_uri:
+            textblock = self.read_value_by_textblock('bs')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
-        bs = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
-        return self.__filter_duplicate(bs)
+        bs = self.reader.read_value_by_role(role_uri)
+        return self.latest2year(bs, latest2year)
 
-    def pl(self, ifrs=False):
-        pre = {}
-        cal = {}
-        fix_cal = []
-        role = self.__find_role_name('pl')
-        if len(role) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfIncome", "StatementOfComprehensiveIncome"])
+    def pl(self, latest2year=False):
+        role_uri = self.find_role_name('pl')
+        if not role_uri:
+            textblock = self.read_value_by_textblock('pl')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
-        pl = self.reader.read_value_by_role(role_uri, preserve_cal=cal, fix_cal_node=fix_cal)
-        return self.__filter_duplicate(pl)
+        pl = self.reader.read_value_by_role(role_uri)
+        return self.latest2year(pl, latest2year)
 
-    def cf(self, ifrs=False):
-        pre = {}
-        cal = {}
-        role = self.__find_role_name('cf')
-        if len(role) == 0:
-            textblock = self.__read_value_by_textblock(["StatementOfCashFlows"])
+    def cf(self, latest2year=False):
+        role_uri = self.find_role_name('cf')
+        if not role_uri:
+            textblock = self.read_value_by_textblock('cf')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame([{'label':'','value':'','unit':'JPY','context':'','data_type':'','name':'','depth':1}])
-        role = role[0]
-        role_uri = self.reader.get_role(role).uri
+                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
-        cf = self.reader.read_value_by_role(role_uri, preserve_cal=cal)
-        return self.__filter_duplicate(cf)
+        cf = self.reader.read_value_by_role(role_uri)
+        return self.latest2year(cf, latest2year)
+    
+    def latest2year(self, df:pd.DataFrame, latest2year:bool):
+        if latest2year:
+            no_quarter = '~context.str.contains("Quarter")|~context.str.contains("Duration")'  # eliminate QuarterDuration, not QuarterInstance
+            df = df.query(no_quarter, engine='python')
+        return df
 
-    def __filter_duplicate(self, data):
-        # Exclude dimension member
-        if data is not None:
-            data.drop_duplicates(subset=("name", "period"), keep="first",
-                                inplace=True)
-        return data
+    def find_role_name(self, finance_type:Literal['bs','pl','cf']) -> Optional[str]:
+        scanstable = [x for x in self.reader.role_decision_info if 'table' in x]
+        # old style presentation before 2014
+        if all([x['table']=='' for x in scanstable]):
+            return self.find_role_name2013(scanstable, finance_type)
+        # current style presentation after 20140116
+        assert any([x['table']!='' for x in scanstable])
+        return self.find_role_nameXXXX(scanstable, finance_type)
 
-    def __find_role_name(self, finance_statement):
-        role_candiates = {
-            'bs': ["StatementOfFinancialPosition", "ConsolidatedBalanceSheet", "BalanceSheet"],
-            'pl': ["StatementOfProfitOrLoss", "StatementOfIncome", "ComprehensiveIncomeSingleStatement", "StatementsOfIncome"],
-            'cf': ["StatementOfCashFlows"],
+    def find_role_nameXXXX(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf']) -> Optional[str]:
+        table_candidates = {
+            'bs': ['BalanceSheetTable','StatementOfFinancialPositionIFRSTable'],
+            'pl': ['StatementOfIncomeTable','StatementOfProfitOrLossIFRSTable','StatementOfComprehensiveIncomeIFRSTable'],  # StatementOfProfitOrLossIFRSTable from 2019-04-23, StatementOfComprehensiveIncomeIFRSTable without ProfitOrLossIFRSTable from 2019-04-25
+            'cf': ['StatementOfCashFlowsTable','StatementOfCashFlowsIFRSTable'],
+            'che': ['StatementOfChangesInEquityTable','StatementOfChangesInEquityIFRSTable'],
         }
-        roles = []
-        for name in role_candiates[finance_statement]:
-            roles += [x for x in self.reader.custom_roles.keys() if name in x and 'Notes' not in x and x not in roles]
-        return roles
+        for table in table_candidates[finance_type]:
+            for scan in scans:
+                if table == scan['table'] and self.consolidated == (scan['cons_nocons']=="ConsolidatedMember"):
+                    return scan['xlink_role']
+        # オリックス株式会社【8591】 is 〔米国基準〕(連結), but only NonConsolidated financial report(XBRL) and Consolidated financial TextBlock
+        # # for table in table_candidates[finance_type]:
+        # #     for scan in scans: if table == scan['table']: return scan['xlink_role']
+        return None
 
-    def __read_value_by_textblock(self, candidates):
-        values = self.reader.find_value_names(candidates)
-        textblocks = [x for x in values if x.endswith('TextBlock')]
-        if len(textblocks) == 0:
-            return None
-        element_value = self.reader.findv(textblocks[0])
-        return element_value
+    def find_role_name2013(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf']) -> Optional[str]:
+        table_candidates2013 = {
+            'bs': ['BalanceSheets'],
+            'pl': ['StatementsOfIncome'],
+            'cf': ['StatementsOfCashFlows'],
+            'cha': ['StatementsOfChangesInNetAssets'],
+        }
+        for table in table_candidates2013[finance_type]:
+            for scan in scans:
+                if table in scan['xlink_role'] and \
+                    (not self.consolidated) == ('NonConsolidated' in scan['xlink_role'].split(table)[0]):   # ConsolidatedXXX, ConsolidatedQuarterlyXXX
+                    return scan['xlink_role']
+        return None
+
+    def read_value_by_textblock(self, finance_type:Literal['bs','pl','cf']) -> Optional[ElementValue]:
+        textblock_candidates = {
+            'bs': ['BalanceSheetHeading'], #,'StatementOfFinancialPositionIFRSHeading']) # 
+            'pl': ['StatementOfIncomeHeading','StatementOfProfitOrLossIFRSHeading','StatementOfComprehensiveIncomeSingleStatementHeading'], # StatementOfComprehensiveIncomeSingleStatementHeading:6464:2018-02-14
+            'cf': ['StatementOfCashFlowsHeading','StatementOfCashFlowsIFRSHeading'],
+        }
+        scansheading = [x for x in self.reader.role_decision_info if 'heading' in x]
+        for heading in textblock_candidates[finance_type]:
+            for scan in scansheading:
+                if heading in scan['heading'] and \
+                   self.consolidated == (scan['cons_nocons']=='Consolidated'):
+                    textblock_name = ':'.join(scan['xlink_href'].split('_', 2))
+                    textblock = self.reader.findv(textblock_name)
+                    return textblock
+        return None
 
     def __read_finance_statement(self, statement_xml):
         def myen(vtext, unit):

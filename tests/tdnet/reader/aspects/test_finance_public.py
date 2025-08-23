@@ -30,8 +30,8 @@ class TestFinancePublic(unittest.TestCase):
         feature = self.reader.extract(Finance).accounting_standards
         self.assertEqual(feature.normalized_text, "Japan GAAP")
 
-    def test_fiscal_period_kind(self):
-        feature = self.reader.extract(Finance).fiscal_period_kind
+    def test_report_period_kind(self):
+        feature = self.reader.extract(Finance).report_period_kind
         self.assertEqual(feature.normalized_text, "Q1")
 
     def test_namespaces(self):
@@ -60,7 +60,7 @@ class TestFinancePublic(unittest.TestCase):
         self.assertGreater(len(pl), 0)
 
     def test_cf(self):
-        if self.reader.extract(Finance).fiscal_period_kind == 'ALL':
+        if self.reader.extract(Finance).report_period_kind == 'ALL':
             cf = self.reader.extract(Finance).cf()
             if type(cf) is not list:
                 self.assertGreater(len(cf), 0)

@@ -26,8 +26,8 @@ class TestMetadata(unittest.TestCase):
         feature = self.reader.extract(Metadata).fiscal_year
         self.assertEqual(feature, 2017)
 
-    def test_fiscal_period_kind(self):
-        feature = self.reader.extract(Metadata).fiscal_period_kind
+    def test_report_period_kind(self):
+        feature = self.reader.extract(Metadata).report_period_kind
         self.assertEqual(feature.value, "FY")
 
     def test_company_name(self):

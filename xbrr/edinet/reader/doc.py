@@ -72,7 +72,7 @@ class Doc(XbrlDoc):
             raise FileNotFoundError("No Attachment or Summary folder found.")
 
     @property
-    def fiscal_year_date(self) -> datetime:
+    def report_period_end_date(self) -> datetime:
         if 'PublicDoc' in self.file_spec:
             # PublicDoc/jpcrp030000-asr-001_E00883-000_2020-12-31_01_2021-03-26
             #  split by '_'           0         1           2      3     4
@@ -100,7 +100,7 @@ class Doc(XbrlDoc):
 
     @property
     def consolidated(self) -> bool:
-        raise FileNotFoundError("Not implemented because of no information for consolidated identification")
+        raise LookupError("Not implemented because of no information for consolidated identification")
 
     @property
     def accounting_standard(self) -> str:

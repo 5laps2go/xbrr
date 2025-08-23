@@ -72,21 +72,21 @@ class TestReader(unittest.TestCase):
         self.assertTrue(local_element.label, "経営者による財政状態、経営成績及びキャッシュ・フローの状況の分析")
 
     def test_read_schema_by_role(self):
-        bs = self.reader.read_schema_by_role("rol_BalanceSheet").reset_index()
+        bs = self.reader.read_schema_by_role(self.reader.custom_roles["rol_BalanceSheet"].uri).reset_index()
         bs = bs[[x for x in bs.columns if is_object_dtype(bs[x])]] # drop implementation specific columns
         self.assertGreater(len(bs), 0)
         expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DE5C-bs.csv"),index_col=0,dtype=bs.dtypes.apply(lambda x: {'object':str,'int64':int,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
         assert_frame_equal(bs, expected_df)
 
     def test_read_value_by_role(self):
-        pl = self.reader.read_value_by_role("rol_StatementOfIncome")
+        pl = self.reader.read_value_by_role(self.reader.custom_roles["rol_StatementOfIncome"].uri)
         assert pl is not None
         self.assertGreater(len(pl), 0)
         expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DE5C-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'float64':float,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
         assert_frame_equal(pl, expected_df)
 
     def test_read_current_value_by_role(self):
-        pl = self.reader.read_value_by_role("rol_StatementOfIncome", scope='Current')
+        pl = self.reader.read_value_by_role(self.reader.custom_roles["rol_StatementOfIncome"].uri, scope='Current')
         assert pl is not None
         self.assertGreater(len(pl), 0)
         expected_df = pd.read_csv(os.path.join(os.path.dirname(__file__), "../data/S100DE5C-pl.csv"),index_col=0,dtype=pl.dtypes.apply(lambda x: {'object':str,'int64':int,'float64':float,'bool':bool}[x.name]).to_dict(),keep_default_na=False)
