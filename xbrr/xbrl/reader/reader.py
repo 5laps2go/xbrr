@@ -259,14 +259,14 @@ class Reader(BaseReader):
             if report_start is not None and report_start.strftime("%Y-%m-%d") != self._context_dic[sorted_context_ids[0]]['period_start']:
                 self.logger.info("report_start {} does not match period_start {}: {}".format(
                     report_start.strftime("%Y-%m-%d"), self._context_dic[sorted_context_ids[0]]['period_start'], sorted_context_ids))
-            if sorted_context_ids[0].startswith('Prior'):
-                assert False
+            if len(sorted_context_ids) > 1:
+                assert not (sorted_context_ids[0].startswith('Prior') and sorted_context_ids[1].startswith('Current')), "invalid context ids: {}".format(sorted_context_ids)
             period_start = self._context_dic[sorted_context_ids[0]]['period_start']
         if report_end is not None and report_end.strftime("%Y-%m-%d") != self._context_dic[sorted_context_ids[0]]['period']:
             self.logger.info("report_end {} does not match period_end {}: {}".format(
                 report_end.strftime("%Y-%m-%d"), self._context_dic[sorted_context_ids[0]]['period'], sorted_context_ids))
-            if sorted_context_ids[0].startswith('Prior'):
-                assert False
+            if len(sorted_context_ids) > 1:
+                assert not (sorted_context_ids[0].startswith('Prior') and sorted_context_ids[1].startswith('Current')), "invalid context ids: {}".format(sorted_context_ids)
         period_end = self._context_dic[sorted_context_ids[0]]['period']
         
         current_vdic = {k:v for (k,vlist) in self.context_value_dic.items() if (v:=filter_period(vlist))}
