@@ -40,6 +40,8 @@ class Forecast(BaseParser):
 
             "forecast_correction_flag": "tse-ed-t:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
+
+            "dividends_note": "tse-ed-t:NoteToDividends",
         }
         tse_t_ed_tags = {
             "document_name": "tse-t-ed:DocumentName",
@@ -228,7 +230,12 @@ class Forecast(BaseParser):
         if not role_uri:
             return None
         fc = self.reader.read_value_by_role(role_uri, report_start=self.forecast_year_start_date, report_end=self.forecast_year_end_date)
-        return self.__filter_forecast_items_only(fc)
+        return self.__filter_forecast_pershare_only(fc)
+    
+    def fc_dividends_note(self) -> Optional[str]:
+        if self.dividends_note is None:
+            return None
+        return self.dividends_note.normalized_text.strip()
     
     def dividend_per_share(self, latest2year=False) -> float:
         import numpy as np
@@ -243,13 +250,82 @@ class Forecast(BaseParser):
             except ValueError:
                 pass
             return np.nan
+
         fc_df = self.fc_dividends(latest2year)
         if fc_df is None or fc_df.empty:
             return np.nan
-        query_forecast_figures = 'value!="NaN"&member.str.contains("Forecast")&not member.str.startswith("Annual")'
-        fc_df = fc_df.query(query_forecast_figures, engine='python')
-        money = fc_df.query('data_type=="perShare"')[['name','value']].astype({'value':float})
-        return money.query('name=="tse-ed-t:DividendPerShare"')['value'].sum()
+        
+        # if Annual forecast exists, it is a forecast perShare value
+        if fc_df[fc_df['member'].str.contains("Annual")].shape[0]>0:
+            fc_df = fc_df[fc_df['member'].str.contains("Annual")]
+        # if Annual forecast does not exist and Result exists, dividend split may happened
+        else:
+            analyzed = self.dividend_note()
+            if analyzed and 'split_ratio' in analyzed and analyzed['split_ratio'] is not None \
+                and analyzed['split_date'] > fc_df['period_start'].min():
+                ratio = analyzed['split_ratio']
+                adjustedDPS = fc_df[fc_df['member'].str.contains("SecondQuarter")].astype({'value':float})['value'].sum() / ratio
+                forecastDPS = fc_df[fc_df['member'].str.contains("SecondQuarter")==False].astype({'value':float})['value'].sum()
+                return adjustedDPS + forecastDPS
+        
+        money = fc_df[['name','value']].astype({'value':float})
+        return money['value'].sum()
+        
+    def dividend_note(self) -> dict[str, Optional[object]]:
+        return self.analyze_dividend_note_block(self.fc_dividends_note() or "")
+    
+    def analyze_dividend_note_block(self, text:str) -> dict[str, Optional[object]]:
+        def is_split_mentioned(text: str) -> bool:
+            return "株式分割" in text
+        def _parse_split_date(text) -> Optional[date]:
+            match = re.search(r"(20\d{2})年(\d{1,2})月(\d{1,2})日.{0,10}効力発生日", text)
+            if match:
+                return datetime(int(match[1]), int(match[2]), int(match[3]))
+            return None
+        def parse_split_date(text) -> Optional[date]:
+            # 日付パターンを抽出（例: 2025年4月1日）
+            date_matches = re.findall(r"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日", text)
+            for match in date_matches:
+                y, m, d = map(int, match)
+                date_obj = datetime(y, m, d)
+
+                # 周辺の文脈に分割関連語があるか確認
+                # 対象: その日付の前後50文字に「株式」「分割」「効力発生」「付」など
+                pattern = f"{y}年\s*{m}月\s*{d}日"
+                match_span = re.search(pattern, text)
+                if match_span:
+                    start = max(0, match_span.start() - 10)
+                    end = match_span.end() + 10
+                    context = text[start:end]
+                    if re.search(r"(分割|効力発生|付|株式)", context):
+                        return date_obj
+            return None  # 該当なし        
+        def parse_split_ratio(text) -> Optional[int]:
+            match = re.search(r"1株.*?(\d{1,2})株", text)
+            if match:
+                return int(match[1])
+            return None
+        def check_split_affects_fiscal_year(split_date, fiscal_start, fiscal_end, text) -> bool:
+            if not split_date:
+                return False
+            if fiscal_start <= split_date <= fiscal_end:
+                if "分割後" in text or "考慮" in text or "単純合算ができない" in text:
+                    return True
+            return False
+
+        text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+        if not is_split_mentioned(text):
+            return None
+
+        split_date = parse_split_date(text)
+        split_ratio = parse_split_ratio(text)
+        # affected = check_split_affects_fiscal_year(split_date, fiscal_start, fiscal_end, text)
+        result = {
+            "split_date": split_date.strftime('%Y-%m-%d') if split_date else "不明",
+            "split_ratio": split_ratio,
+            # "split_affects_fiscal_year": "✔️" if affected else "❌"
+        }
+        return result
 
     def q2ytd(self, latest2year=False):
         role_uri = self.find_role_name('fc_q2ytd')
@@ -282,3 +358,18 @@ class Forecast(BaseParser):
             forecast_query += '&(member.str.contains("Forecast")|member.str.contains("Lower")|member.str.contains("Upper"))'
         filtered = filtered.query(forecast_query, engine='python')
         return filtered
+
+    def __filter_forecast_pershare_only(self, data:DataFrame) -> Optional[DataFrame]:
+        if data.size == 0:
+            return None
+        
+        # perShare data type only
+        filtered = data[data['data_type']=='perShare']
+        # latest period_start only
+        filtered = filtered[filtered['period_start']==filtered['period_start'].max()]
+        # eliminate PreviousMember as previous forecast
+        filtered = filtered[filtered['member'].str.contains("Previous")==False]
+        # eliminate NaN value
+        filtered = filtered[filtered['value']!="NaN"]
+        return filtered
+    
