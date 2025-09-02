@@ -291,7 +291,7 @@ class Forecast(BaseParser):
         def parse_split_date(text) -> Optional[date]:
             # 日付パターンを抽出（例: 2025年4月1日）
             date_matches = re.findall(r"(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日", text)
-            for match in date_matches:
+            for match in reversed(date_matches): # take the last one if multiple found, because it may be the latest one
                 y, m, d = map(int, match)
                 date_obj = datetime(y, m, d)
 
@@ -307,9 +307,9 @@ class Forecast(BaseParser):
                         return date_obj
             return None  # 該当なし        
         def parse_split_ratio(text) -> Optional[int]:
-            match = re.search(r"1株.*?(\d{1,2})株", text)
-            if match:
-                return int(match[1])
+            matches = re.findall(r"1株.{0,5}(\d{1,2})株", text)
+            if matches:
+                return int(matches[-1]) # take the last one if multiple found, because it may be the latest one
             return None
         def check_split_affects_fiscal_year(split_date, fiscal_start, fiscal_end, text) -> bool:
             if not split_date:
