@@ -255,6 +255,8 @@ class Forecast(BaseParser):
         if fc_df is None or fc_df.empty:
             return np.nan
         
+        # dividend per share name only
+        fc_df = fc_df[fc_df['name']=="tse-ed-t:DividendPerShare"]
         # if Annual forecast exists, it is a forecast perShare value
         if fc_df[fc_df['member'].str.contains("Annual")].shape[0]>0:
             fc_df = fc_df[fc_df['member'].str.contains("Annual")]
@@ -315,7 +317,7 @@ class Forecast(BaseParser):
 
         text = text.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
         if not is_split_mentioned(text):
-            return None
+            return {}
 
         split_date = parse_split_date(text)
         split_ratio = parse_split_ratio(text)
