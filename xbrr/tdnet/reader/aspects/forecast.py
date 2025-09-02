@@ -266,8 +266,12 @@ class Forecast(BaseParser):
             if analyzed and 'split_ratio' in analyzed and analyzed['split_ratio'] is not None \
                 and analyzed['split_date'] > fc_df['period_start'].min():
                 ratio = analyzed['split_ratio']
-                adjustedDPS = fc_df[fc_df['member'].str.contains("SecondQuarter")].astype({'value':float})['value'].sum() / ratio
-                forecastDPS = fc_df[fc_df['member'].str.contains("SecondQuarter")==False].astype({'value':float})['value'].sum()
+                fc_df_2q = fc_df[fc_df['member'].str.contains("SecondQuarter")].astype({'value':float})
+                adjustedDPS = fc_df_2q['value'].mean() / ratio
+                if fc_df_2q.shape[0]>1:
+                    # Dividend split happened, but multiple SecondQuarter forecast and result found.
+                    adjustedDPS = fc_df_2q[fc_df_2q['member'].str.contains("Result")]['value'].mean() / ratio
+                forecastDPS = fc_df[fc_df['member'].str.contains("SecondQuarter")==False].astype({'value':float})['value'].mean()
                 return adjustedDPS + forecastDPS
         
         money = fc_df[['name','value']].astype({'value':float})
