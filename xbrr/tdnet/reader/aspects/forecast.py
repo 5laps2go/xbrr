@@ -307,7 +307,7 @@ class Forecast(BaseParser):
                         return date_obj
             return None  # 該当なし        
         def parse_split_ratio(text) -> Optional[int]:
-            matches = re.findall(r"1株.{0,5}(\d{1,2})株", text)
+            matches = re.findall(r"1株[^\d]{0,5}(\d{1,2})株", text)
             if matches:
                 return int(matches[-1]) # take the last one if multiple found, because it may be the latest one
             return None
