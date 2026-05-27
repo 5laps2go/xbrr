@@ -4,6 +4,7 @@ import os
 import re
 from datetime import datetime
 from typing import cast
+from logging import getLogger
 
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag, PageElement
@@ -35,8 +36,10 @@ class Doc(XbrlDoc):
         self.file_spec = os.path.splitext(xbrl_file)[0]
         super().__init__("tdnet", root_dir=root_dir, xbrl_file=xbrl_file)
 
-    @staticmethod
-    def find_report(root_dir: str) -> "Doc":
+        self.logger = getLogger(__name__)
+
+    @classmethod
+    def find_report(cls, root_dir: str) -> "Doc":
         try:
             doc = Doc(root_dir=root_dir, xbrl_kind='summary')
         except FileNotFoundError as e:
@@ -296,6 +299,9 @@ class Doc(XbrlDoc):
             nsdecls = xbrl_xml.attrs
             __xlate_to_xbrl(element)
         def translate_ixbrl(infile, outbs):
+            if not os.path.isfile(infile):
+                self.logger.warn(f"ixbrl file does not exist: {infile}")
+                return
             with open(infile, encoding="utf-8-sig") as f:
                 ixbrl = BeautifulSoup(f, "lxml-xml")
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 
 from xbrr.base.reader.base_parser import BaseParser
 from xbrr.base.reader.base_reader import BaseReader
@@ -54,7 +54,16 @@ class Metadata(BaseParser):
         return year
 
     @property
-    def fiscal_year_end_date(self) -> datetime:
+    def fiscal_year_start_date(self) -> date:
+        # TODO: fiscal_date_startがない場合、contextから取得する
+        # value = self.get_value("fiscal_date_start")
+        # if value is not None:
+        #     date = datetime.strptime(value.value, "%Y-%m-%d")
+        #     return date
+        return self._get_fiscal_year_start_date_from_context()
+    
+    @property
+    def fiscal_year_end_date(self) -> date:
         value = self.get_value("fiscal_date_end")
         assert value is not None
         date = datetime.strptime(value.value, "%Y-%m-%d")

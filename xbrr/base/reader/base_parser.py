@@ -2,7 +2,8 @@ from typing import Optional
 
 import re
 import unicodedata
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
+from logging import getLogger
 
 from xbrr.base.reader.base_reader import BaseReader
 from xbrr.xbrl.reader.element_value import ElementValue
@@ -19,6 +20,8 @@ class BaseParser():
         self.tags = {}
         if len(tags) > 0:
             self.tags = tags
+
+        self.logger = getLogger(__name__)
             
     def __getattr__(self, name:str) -> Optional[ElementValue]:
         if name in self.tags.keys():
@@ -84,3 +87,24 @@ class BaseParser():
     @property
     def fiscal_year_start_date(self) -> date:
         raise NotImplementedError("You have to implement fiscal_year_start_date.")
+    
+    def _get_fiscal_year_start_date_from_context(self) -> date:
+        """
+        Get fiscal year start date from context information
+        """
+        def get_start_days(d) -> tuple[date, int, date]:
+            start = datetime.strptime(d['period_start'], "%Y-%m-%d").date()
+            end = datetime.strptime(d['period'], "%Y-%m-%d").date()
+            duration = end - start
+            months = min(round(duration.days / 30.44), 12)
+            return start, months, end
+        fyed = self.fiscal_year_end_date
+        durations = [get_start_days(duration) for duration in self.reader.context_dic.values()
+                     if 'period_start' in duration and duration['period']<=fyed.isoformat()]
+        if not durations:
+            self.logger.warning("No duration contexts found.")
+            return fyed
+        fysd = sorted(durations, key=lambda x: (x[2],x[1],x[0]), reverse=True)[0][0]
+        return fysd
+
+

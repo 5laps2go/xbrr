@@ -62,12 +62,10 @@ class TestForecast(unittest.TestCase):
         self.assertAlmostEqual(dps, 80.0)
 
     def test_dividend_per_share_split_affects_fiscal_year(self):
-        _dir = os.path.join(os.path.dirname(__file__), "/tmp")
-        client = DocumentClient()
         # 住友林業 2025年12月期第2四半期(中間期)決算短信〔日本基準〕(連結)
-        root_dir = client.get_xbrl("081220250807534279", save_dir=_dir, expand_level="dir")
-        xbrl_doc = Doc(root_dir=str(root_dir), xbrl_kind="summary")
-        reader = Reader(xbrl_doc, save_dir=_dir)
+        root_dir = os.path.join(self._dir, "081220250807534279")
+        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="summary")
+        reader = Reader(xbrl_doc, save_dir=self._dir)
         result = reader.extract(Forecast).dividend_note()
         self.assertDictEqual(result, {"split_date": "2025-07-01", "split_ratio": 3})
         dps = reader.extract(Forecast).dividend_per_share()

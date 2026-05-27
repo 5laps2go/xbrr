@@ -4,6 +4,7 @@ import re
 import warnings
 import calendar
 from datetime import date, datetime, timedelta
+import pandas as pd
 from pandas import DataFrame
 
 from xbrr.base.reader.base_parser import BaseParser
@@ -16,11 +17,17 @@ class Forecast(BaseParser):
         'fc': ["ForecastsTable","InformationAnnualTable"],
         'fc_dividends': ["DividendsTable","DividendForecastTable"],
         'fc_q2ytd': ["InformationQ2YTDTable"],
+        'sm_pl': ["BusinessResultsOperatingResultsTable","BusinessResultsQuarterlyOperatingResultsTable","BusinessResultsOverviewNonconsolidatedOperatingResultsTable","BusinessResultsOverviewQuarterlyNonconsolidatedOperatingResultsTable"],
+        'sm_bs': ["BusinessResultsFinancialPositionsTable","BusinessResultsQuarterlyFinancialPositionsTable","BusinessResultsOverviewNonconsolidatedFinancialPositionsTable","BusinessResultsOverviewQuarterlyNonconsolidatedFinancialPositionsTable"],
+        'sm_cf': ["BusinessResultsCashFlowsTable"],
     }
     tse_t_ed_table_candiates: dict[str, list[str]] = {
         'fc': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
         'fc_dividends': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
         'fc_q2ytd': [],
+        'sm_pl': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
+        'sm_bs': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
+        'sm_cf': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
     }
 
     def __init__(self, reader:Reader):
@@ -41,6 +48,10 @@ class Forecast(BaseParser):
             "forecast_correction_flag": "tse-ed-t:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-ed-t:CorrectionOfDividendForecastInThisQuarter",
 
+            "consolidation_scope_changes_flag": "tse-ed-t:SignificantChangesInTheScopeOfConsolidationDuringThePeriod",
+            "consolidation_scope_changes_flagUS": "tse-ed-t:SignificantChangesInTheScopeOfConsolidationDuringThePeriodUS",
+            "consolidation_scope_changes_flagIFRS": "tse-ed-t:SignificantChangesInTheScopeOfConsolidationDuringThePeriodIFRS",
+
             "dividends_note": "tse-ed-t:NoteToDividends",
         }
         tse_t_ed_tags = {
@@ -56,6 +67,10 @@ class Forecast(BaseParser):
 
             "forecast_correction_flag": "tse-t-ed:CorrectionOfConsolidatedFinancialForecastInThisQuarter",
             "dividend_correction_flag": "tse-t-ed:CorrectionOfDividendForecastInThisQuarter",
+
+            "consolidation_scope_changes_flag": "tse-t-ed_MaterialChangesInSubsidiariesDuringThisPeriodChangesInScopeOfConsolidationsResultingFromChangeIsSubsidiaries",
+            "consolidation_scope_changes_flagUS": "tse-t-ed_MaterialChangesInSubsidiariesDuringThisPeriodChangesInScopeOfConsolidationsResultingFromChangeIsSubsidiariesUS",
+            "consolidation_scope_changes_flagIFRS": "tse-t-ed_MaterialChangesInSubsidiariesDuringThisPeriodChangesInScopeOfConsolidationsResultingFromChangeIsSubsidiariesIFRS",
 
             "ForecastDividendPerShare": "tse-t-ed:ForecastDividendPerShareAnnual",
             "ForecastUpperDividendPerShare":"tse-t-ed:ForecastUpperDividendPerShareAnnual",
@@ -125,6 +140,14 @@ class Forecast(BaseParser):
             std = 'us'
         return std
     
+    def estimate_standard(self, df:DataFrame) -> Literal['jp','if','us']:
+        std = 'jp'
+        if any(df['name'].str.endswith('US')):
+            std = 'us'
+        elif any(df['name'].str.endswith('IFRS')):
+            std = 'if'
+        return std
+    
     @property
     def reporting_date(self) -> ElementValue:
         wareki = {'令和': 2019, '平成': 1989, '昭和': 1926}
@@ -147,14 +170,17 @@ class Forecast(BaseParser):
 
     @property
     def reporting_iso_date(self) -> str:
+        file_date = self.reader.xbrl_doc.published_date[0].date().isoformat()
         try:
             report_date = self.reporting_date.value
             m = re.search(r'([0-9]+)[年-]([0-9]+)[月-]([0-9]+)日?', report_date)
             if m is not None:
-                return date(*(int(x) for x in m.groups())).isoformat()
+                print_date = date(*(int(x) for x in m.groups())).isoformat()
+                if print_date > file_date:
+                    return print_date
         except NameError:
             pass
-        return self.reader.xbrl_doc.published_date[0].date().isoformat()
+        return file_date
     
     @property
     def forecast_period(self) -> str:
@@ -169,16 +195,13 @@ class Forecast(BaseParser):
 
     @property
     def fiscal_year_start_date(self) -> date:
-        end_date = self.fiscal_year_end_date
-        assert end_date != None
-        next_start_date = end_date + timedelta(days=1)
-        return datetime(year=next_start_date.year-1, month=next_start_date.month, day=next_start_date.day)
+        return self._get_fiscal_year_start_date_from_context()
 
     @property
     def fiscal_year_end_date(self) -> date:
         value = self.get_value("fiscal_date_end")
         assert value is not None
-        return datetime.strptime(value.value, "%Y-%m-%d")
+        return datetime.strptime(value.value, "%Y-%m-%d").date()
 
     @property
     def consolidated(self):
@@ -195,7 +218,9 @@ class Forecast(BaseParser):
         start_date = self.fiscal_year_start_date
         assert start_date != None
         if self.reader.xbrl_doc.published_date[1] == 'a':
-            start_date = datetime(year=start_date.year+1, month=start_date.month, day=start_date.day)
+            end_date = self.fiscal_year_end_date
+            assert end_date != None
+            start_date = end_date + timedelta(days=1)
         return start_date
 
     @property
@@ -276,7 +301,24 @@ class Forecast(BaseParser):
         
         money = fc_df[['name','value']].astype({'value':float})
         return money['value'].sum()
-        
+
+    @property
+    def consolidation_scope_changes(self) -> str:
+        def flag_to_str(flag:ElementValue) -> str:
+            if flag.value.lower() == 'true' or flag.value == '有' or flag.value == '1':
+                return "有"
+            elif flag.value.lower() == 'false' or flag.value == '無' or flag.value == '0':
+                return "無"
+            else:
+                return "不明"
+        if self.consolidation_scope_changes_flag is not None:
+            return flag_to_str(self.consolidation_scope_changes_flag)
+        elif self.consolidation_scope_changes_flagUS is not None:
+            return flag_to_str(self.consolidation_scope_changes_flagUS)
+        elif self.consolidation_scope_changes_flagIFRS is not None:
+            return flag_to_str(self.consolidation_scope_changes_flagIFRS)
+        return "無"
+
     def dividend_note(self) -> dict[str, Optional[object]]:
         return self.analyze_dividend_note_block(self.fc_dividends_note() or "")
     
@@ -340,13 +382,34 @@ class Forecast(BaseParser):
         q2ytd = self.reader.read_value_by_role(role_uri)
         return q2ytd if q2ytd is None or not latest2year else self.__filter_forecast_items_only(q2ytd)
 
+    def sm_pl(self, latest2year=False):
+        role_uri = self.find_role_name('sm_pl')
+        if not role_uri:
+            return None
+        sm_pl = self.reader.read_value_by_role(role_uri)
+        return self.__df_duration_from_fiscal_year_start_date(sm_pl, latest2year)
+
+    def sm_bs(self, latest2year=False):
+        role_uri = self.find_role_name('sm_bs')
+        if not role_uri:
+            return None
+        sm_bs = self.reader.read_value_by_role(role_uri)
+        return self.__df_instant(sm_bs, latest2year)
+
+    def sm_cf(self, latest2year=False):
+        role_uri = self.find_role_name('sm_cf')
+        if not role_uri:
+            return None
+        sm_cf = self.reader.read_value_by_role(role_uri)
+        return self.__df_duration_from_fiscal_year_start_date(sm_cf, latest2year)
+
     def find_role_name(self, finance_type:Literal['fc','fc_dividends','fc_q2ytd']) -> Optional[str]:
         scanstable = [x for x in self.reader.role_decision_info if 'table' in x]
         for table in self.table_candidates[finance_type]:
             for scan in scanstable:
                 # fc_dividends may have NonConsolidatedMember even if the finance is ConsolidatedMember.
                 if table in scan['table'] and \
-                    (finance_type=='fc_dividends' or self.consolidated == (scan['cons_nocons']=="ConsolidatedMember")):
+                    (finance_type=='fc_dividends' or self.consolidated == (scan['cons_nocons'].startswith("Consolidated"))):
                     # (self.consolidated == (scan['cons_nocons']=="ConsolidatedMember") or scan['cons_nocons']=="ConsNonconsMember"):
                     return scan['xlink_role']
         return None
@@ -378,4 +441,19 @@ class Forecast(BaseParser):
         # eliminate NaN value
         filtered = filtered[filtered['value']!="NaN"]
         return filtered
+
+    def __df_duration_from_fiscal_year_start_date(self, df:DataFrame, latest2year:bool) -> DataFrame:
+        if 'context' in df.columns:
+            fy_start = self.fiscal_year_start_date
+            month_day = fy_start.strftime('%m-%d')
+            df = df[(df['context'].str.endswith('Duration'))&(df['period_start'].str.endswith(month_day))]
+            if latest2year:
+                df = df[(~df['context'].str.startswith('Prior2')) & (~df['context'].str.startswith('Prior3'))]
+        return df if not df.empty else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
     
+    def __df_instant(self, df:DataFrame, latest2year:bool) -> DataFrame:
+        if 'context' in df.columns:
+            df = df[(df['context'].str.endswith('Instant'))&(~df['context'].str.startswith('Prior1Quarter'))]
+            if latest2year:
+                df = df[(~df['context'].str.startswith('Prior2')) & (~df['context'].str.startswith('Prior3'))]
+        return df if not df.empty else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])

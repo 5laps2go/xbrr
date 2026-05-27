@@ -23,8 +23,12 @@ class BaseReader():
         self.xbrl_doc = xbrl_doc
 
     @property
+    def context_dic(self) -> dict[str,dict[str,str]]:
+        raise NotImplementedError("You have to implement context_dic property.")
+    
+    @property
     def custom_roles(self):
-        raise NotImplementedError("You have to implement custom_roles method.")
+        raise NotImplementedError("You have to implement custom_roles property.")
 
     def presentation_version(self) -> str:
         raise NotImplementedError("You have to implement presentation_version method.")
