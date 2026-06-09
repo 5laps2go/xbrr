@@ -62,12 +62,10 @@ class TestForecast(unittest.TestCase):
         self.assertAlmostEqual(dps, 80.0)
 
     def test_dividend_per_share_split_affects_fiscal_year(self):
-        _dir = os.path.join(os.path.dirname(__file__), "/tmp")
-        client = DocumentClient()
         # 住友林業 2025年12月期第2四半期(中間期)決算短信〔日本基準〕(連結)
-        root_dir = client.get_xbrl("081220250807534279", save_dir=_dir, expand_level="dir")
-        xbrl_doc = Doc(root_dir=str(root_dir), xbrl_kind="summary")
-        reader = Reader(xbrl_doc, save_dir=_dir)
+        root_dir = os.path.join(self._dir, "081220250807534279")
+        xbrl_doc = Doc(root_dir=root_dir, xbrl_kind="summary")
+        reader = Reader(xbrl_doc, save_dir=self._dir)
         result = reader.extract(Forecast).dividend_note()
         self.assertDictEqual(result, {"split_date": "2025-07-01", "split_ratio": 3})
         dps = reader.extract(Forecast).dividend_per_share()
@@ -85,7 +83,7 @@ class TestForecast(unittest.TestCase):
             """(注)直近に公表されている配当予想からの修正の有無：無※１中間配当金は普通配当18円、記念配当２円、期末配当金は普通配当18円、記念配当２円であります。※２当社は、2025年９月１日を効力発生日として、普通株式１株につき３株の割合で株式分割を行う予定です。中間配当金は20円、期末配当金は当該株式分割の影響を考慮した金額７円を記載しております。また、年間配当金の合計につきましては、株式分割により単純比較ができないため表示しておりません。なお、当該株式分割を考慮しない場合の期末配当金は21円、年間配当金は41円となります。""",
         ]
         result = self.reader.extract(Forecast).analyze_dividend_note_block(text_blocks[0])
-        self.assertEqual(result, None)
+        self.assertDictEqual(result, {})
         result = self.reader.extract(Forecast).analyze_dividend_note_block(text_blocks[1])
         self.assertDictEqual(result, {"split_date": "2024-10-01", "split_ratio": 10})
         result = self.reader.extract(Forecast).analyze_dividend_note_block(text_blocks[2])

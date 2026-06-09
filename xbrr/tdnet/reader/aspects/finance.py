@@ -1,3 +1,4 @@
+from math import e
 from typing import Optional, Literal, Callable, cast
 
 from datetime import date, datetime, timedelta
@@ -35,7 +36,7 @@ class Finance(BaseParser):
             "_fiscal_year_end_date": "jpdei_cor:CurrentFiscalYearEndDateDEI",
             "company_name": "jpdei_cor:FilerNameInJapaneseDEI",
 
-            "_fiscal_year_end_date0": "tse-o-di:FiscalYearEnd",
+            # "_fiscal_year_end_date0": "tse-o-di:FiscalYearEnd",
             "report_FY": "tse-o-di:TypeOfReports-Annual",
             "report_Q1": "tse-o-di:TypeOfReports-FirstQuarter",
             "report_Q2": "tse-o-di:TypeOfReports-SecondQuarter",
@@ -64,11 +65,7 @@ class Finance(BaseParser):
         value = self.get_value("_fiscal_year_start_date")
         if value is not None:
             return datetime.strptime(value.value, "%Y-%m-%d").date()
-        else:  # backward compatibility for old style xbrl
-            end_date = self.fiscal_year_end_date
-            assert end_date != None
-            start_date = end_date - timedelta(days=364)
-            return date(year=start_date.year, month=start_date.month, day=1)
+        return self._get_fiscal_year_start_date_from_context()
 
     @property
     def fiscal_year_end_date(self) -> date:
@@ -76,8 +73,9 @@ class Finance(BaseParser):
         if value is not None:
             return datetime.strptime(value.value, "%Y-%m-%d").date()
         else:  # backward compatibility for old style xbrl
+            return self._get_fiscal_year_end_date_from_reporting_info()
             value = self.get_value("_fiscal_year_end_date0")
-            return datetime.strptime(value.value, "%Y-%m-%d").date() if value else date(year=9999, month=12, day=31)
+            return datetime.strptime(value.value, "%Y-%m-%d").date() if value else self._get_fiscal_year_end_date_from_reporting_info()
 
     @property
     def report_period_end_date(self) -> date:
@@ -97,67 +95,80 @@ class Finance(BaseParser):
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q2")
         if self.report_Q3 and self.report_Q3.value=='true':
             return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Q3")
-        return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="FY")
+        if self.report_FY and self.report_FY.value=='true':
+            return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="FY")
+        return ElementValue("jpdei_cor:TypeOfCurrentPeriodDEI", value="Qx")
 
     @property
     def consolidated(self) -> bool:
         return self.reader.xbrl_doc.consolidated
 
     def bs(self, latest2year=False) -> DataFrame:
-        role_uri = self.find_role_name('bs')
+        role_uri = self.find_role_name('bs', latest2year)
         if not role_uri:
             textblock = self.read_value_by_textblock('bs')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
-        bs = self.reader.read_value_by_role(role_uri, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
-        return self.latest2year(bs, latest2year)
+        bs = self.reader.read_value_by_role(role_uri, report_end=self.report_period_end_date)
+        return self.__df_instant(bs, latest2year)
 
     def pl(self, latest2year=False) -> DataFrame:
-        fix_cal = ['GrossProfit','GrossProfitNetGP','OperatingGrossProfit','GrossProfitIFRS',  # '~^GrossProfit.{,5}$', 1848:2011-05-11 fail, 
-                   'OperatingIncome', 'OperatingProfitLossIFRS','<OperatingIncome','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
+        fix_cal = ['<GrossProfit','OperatingGrossProfit','GrossProfitIFRS',  # GrossProfitOn: 1967:2017-04-28, GrossProfitNetGP
+                   'GrossProfitNetGP',
+                   '<OperatingIncome','OperatingProfitLossIFRS','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
                    'OrdinaryIncome','OrdinaryIncomeBNK','>OrdinaryProfitLoss','~(Operating|Ordinary)[Ll]oss$',
-                   'ProfitLossBeforeTax','ProfitLossBeforeTaxIFRS',  # 2282:2022-05-10
-                   'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
+                   'ProfitLossBeforeTax','ProfitLossBeforeTaxIFRS','IncomeBeforeIncomeTaxes',  # 2282:2022-05-10
+                   'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$', 'ProfitLoss'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
 
-        role_uri = self.find_role_name('pl', exclusion=self._Quarter_period_role_piece)
+        role_uri = self.find_role_name('pl', latest2year, exclusion=self._Quarter_period_role_piece)
         if not role_uri:
             textblock = self.read_value_by_textblock('pl')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
         pl = self.reader.read_value_by_role(role_uri, fix_cal_node=fix_cal, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
-        return self.latest2year(pl, latest2year)
+        return self.__df_duration_from_fiscal_year_start_date(pl, latest2year)
 
     def cf(self, latest2year=False) -> DataFrame:
-        role_uri = self.find_role_name('cf')
+        role_uri = self.find_role_name('cf', latest2year)
         if not role_uri:
             textblock = self.read_value_by_textblock('cf')
             return self.__read_finance_statement(textblock.html) if textblock is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
         cf = self.reader.read_value_by_role(role_uri, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
-        return self.latest2year(cf, latest2year)
+        return self.__df_duration_from_fiscal_year_start_date(cf, latest2year)
 
-    def latest2year(self, df:DataFrame, latest2year:bool) -> DataFrame:
-        if latest2year and 'context' in df.columns:
-            no_quarter = '~context.str.contains("Quarter")|~context.str.contains("Duration")'  # eliminate QuarterDuration, not QuarterInstance
-            df = df.query(no_quarter, engine='python')
+    def __df_duration_from_fiscal_year_start_date(self, df:DataFrame, latest2year:bool) -> DataFrame:
+        if 'context' in df.columns:
+            fy_start = self.fiscal_year_start_date
+            month_day = fy_start.strftime('%m-%d')
+            df = df[(df['context'].str.endswith('Duration'))&(df['period_start'].str.endswith(month_day))]
+            if latest2year:
+                df = df[(~df['context'].str.startswith('Prior2')) & (~df['context'].str.startswith('Prior3'))]
+        return df if not df.empty else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
+    
+    def __df_instant(self, df:DataFrame, latest2year:bool) -> DataFrame:
+        if 'context' in df.columns:
+            df = df[(df['context'].str.endswith('Instant'))&(~df['context'].str.startswith('Prior1Quarter'))]
+            if latest2year:
+                df = df[(~df['context'].str.startswith('Prior2')) & (~df['context'].str.startswith('Prior3'))]
         return df if not df.empty else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
     def scan_presentation(self) -> list[BaseReader.PreTable|BaseReader.PreHeading]:
         return self.reader.role_decision_info
 
-    def find_role_name(self, finance_type:Literal['bs','pl','cf'], exclusion:list[str]=[]) -> Optional[str]:
+    def find_role_name(self, finance_type:Literal['bs','pl','cf'], latest2year:bool=False, exclusion:list[str]=[]) -> Optional[str]:
         scanstable = [x for x in self.scan_presentation() if 'table' in x]
         # old style presentation before 2014
         if all([x['table']=='' for x in scanstable]):
-            return self.find_role_name2013(scanstable, finance_type)
+            return self.find_role_name2013(scanstable, latest2year, finance_type)
         # current style presentation after 20140116
         assert any([x['table']!='' for x in scanstable])
-        return self.find_role_nameXXXX(scanstable, finance_type, exclusion)
+        return self.find_role_nameXXXX(scanstable, finance_type, latest2year, exclusion)
 
-    def find_role_nameXXXX(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf'], exclusion:list[str]) -> Optional[str]:
+    def find_role_nameXXXX(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf'], latest2year:bool, exclusion:list[str]) -> Optional[str]:
         table_candidates = {
             'jp': {  # Japanese GAAP
                 'bs': ['BalanceSheetTable'],
@@ -180,25 +191,40 @@ class Finance(BaseParser):
             }
         }
         accounting_standards = self.reader.xbrl_doc.accounting_standard
+
+        consolidated_switch = self.consolidated
+        if latest2year: # check other [non]consolidated because this is the first year case after changing [non]consolidated accounting
+            if not any([self.consolidated==(s['cons_nocons']=="ConsolidatedMember") for s in scans if s['table'] in table_candidates[accounting_standards]['pl']
+                    and not any([ex in s['xlink_role'] for ex in exclusion])]) and \
+                any([self.consolidated==(s['cons_nocons']=="ConsolidatedMember") for s in scans if s['table'] in table_candidates[accounting_standards]['bs']
+                    and not any([ex in s['xlink_role'] for ex in exclusion])]):
+                consolidated_switch = not self.consolidated
+
         for table in table_candidates[accounting_standards][finance_type]:
             for scan in scans:
-                if table == scan['table'] and self.consolidated == (scan['cons_nocons']=="ConsolidatedMember"):
+                if table == scan['table'] and consolidated_switch == (scan['cons_nocons']=="ConsolidatedMember"):
                     if any([ex in scan['xlink_role'] for ex in exclusion]):
                         continue
                     return scan['xlink_role']
         return None
 
-    def find_role_name2013(self, scans:list[BaseReader.PreTable], finance_type:Literal['bs','pl','cf']) -> Optional[str]:
+    def find_role_name2013(self, scans:list[BaseReader.PreTable], latest2year:bool, finance_type:Literal['bs','pl','cf']) -> Optional[str]:
         table_candidates2013 = {
             'bs': ['BalanceSheets'],
             'pl': ['StatementsOfIncomeYTD','StatementsOfIncome'],
             'cf': ['StatementsOfCashFlows'],
             'cha': ['StatementsOfChangesInNetAssets'],
         }
+        consolidated_switch = self.consolidated
+        if latest2year: # check other [non]consolidated because this is the first year case after changing [non]consolidated accounting
+            if not any([(not self.consolidated) == ('NonConsolidated' in s['xlink_role'].split(t)[0]) for s in scans for t in table_candidates2013['pl'] if t in s['xlink_role']]) and \
+                any([(not self.consolidated) == ('NonConsolidated' in s['xlink_role'].split(t)[0]) for s in scans for t in table_candidates2013['bs'] if t in s['xlink_role']]):
+                consolidated_switch = not self.consolidated
+
         for table in table_candidates2013[finance_type]:
             for scan in scans:
                 if table in scan['xlink_role'] and \
-                    (not self.consolidated) == ('NonConsolidated' in scan['xlink_role'].split(table)[0]):   # ConsolidatedXXX, ConsolidatedQuarterlyXXX
+                    (not consolidated_switch) == ('NonConsolidated' in scan['xlink_role'].split(table)[0]):   # ConsolidatedXXX, ConsolidatedQuarterlyXXX
                     return scan['xlink_role']
         return None
 
@@ -210,19 +236,24 @@ class Finance(BaseParser):
         }
         scansheading = [x for x in self.reader.role_decision_info if 'heading' in x]
         for heading in textblock_candidates[finance_type]:
-            for scan in scansheading:
-                if heading == scan['heading'] and \
-                   self.consolidated == (scan['cons_nocons']=='Consolidated'):
+            scans = [s for s in scansheading if heading in s['heading'] and self.consolidated == (s['cons_nocons']=='Consolidated')]
+            if len(scans) == 1:
+                textblock_name = ':'.join(scans[0]['xlink_href'].split('_', 2))
+                textblock = self.reader.findv(textblock_name)
+                return textblock
+            for scan in scans:
+                if 'YearToQuarter' in scan['xlink_href']:
                     textblock_name = ':'.join(scan['xlink_href'].split('_', 2))
                     textblock = self.reader.findv(textblock_name)
                     return textblock
+                self.logger.warning("Multiple text blocks found for heading: {}".format(heading))
         return None
 
     def __read_finance_statement(self, statement_xml):
         def myen(vtext, unit):
             if vtext in ['－', '-', '―'] or len(vtext)==0:
                 return ''
-            myen = vtext.translate(str.maketrans({',':None, '△':'-', '(': None, ')':None})) + unit
+            myen = vtext.translate(str.maketrans({',':None, '△':'-', '(': None, ')':None})) + unit # '△':'-': 99830:2019-04-11
             return myen
         def isnum(myen):
             try:
@@ -260,18 +291,18 @@ class Finance(BaseParser):
             def col_year(c):
                 years = [int(x) for x in re.split(r'[^\d]',c.text) if x!='' and int(x)>1900]
                 if c.text.strip().startswith('前') and '増減' not in c.text:
-                    return 1
+                    return 7777
                 elif c.text.strip().startswith('当'):
                     return 9999
                 elif years:
                     return years[0]
                 return -1
             colindex = list(itertools.accumulate([int(c.get('colspan','1')) for c in columns]))
-            year_index = sorted([(col_year(c),colindex[i-1]-colindex[-1]) for i,c in enumerate(columns) if col_year(c)>0], key=lambda x: x[1])
-            if len(year_index) > 0: thiscol = year_index[0][1]
+            year_index = sorted([(col_year(c),colindex[i-1]-colindex[-1]) for i,c in enumerate(columns) if col_year(c)>0], key=lambda x: x[0])
+            if len(year_index) > 0: thiscol = year_index[-1][1]
             if len(year_index) > 1:
-                prevcol = year_index[1][1]
-                if year_index[0][0] < year_index[1][0]: thiscol, prevcol = prevcol, thiscol
+                prevcol = year_index[-2][1]
+                if year_index[-1][0]==7777: thiscol, prevcol = prevcol, thiscol # when exist '前' and not exist '当'
             return thiscol, prevcol
         def analyze_column(label, columns, tc, pc):
             def adjust(columns, idx):
@@ -282,9 +313,26 @@ class Finance(BaseParser):
             if len(label) > 2 and not any([c in label for c in '([/#,.])']):
                 return tc + adjust(columns, tc), pc + adjust(columns, pc)
             return tc, pc
+        def analyze_unit(elemlist, unit):
+            for c in elemlist:
+                text = c.text.strip()
+                if '百万円' in text:
+                    return '000000'
+                elif '千円' in text:
+                    return '000'
+                elif '円' in text:
+                    return ''
+            return unit
+        def analyze_unit_till_table(soup):
+            list = []
+            for elem in soup.find_all(True):
+                if elem.name == 'table':
+                    break
+                if elem.name is not None: list.append(elem)
+            return analyze_unit(list, '000000')
 
         thiscol, prevcol = -1, -2
-        unit = '000000'
+        unit = analyze_unit_till_table(statement_xml)
         values = []
         for table in statement_xml.select('table'):
             if (thead := table.find('thead', recursive=False)):
@@ -297,7 +345,9 @@ class Finance(BaseParser):
             tbody = _tbody if (_tbody:=table.find('tbody', recursive=False)) else table
             for record in tbody.find_all('tr', recursive=False):
                 columns = list(record.find_all('td', recursive=False))
-                if len(columns) < max(abs(thiscol), abs(prevcol))+1: continue
+                if len(columns) < max(abs(thiscol), abs(prevcol))+1:
+                    unit = analyze_unit(columns, unit)
+                    continue
                 label, margin = label_margin(columns)
                 if len(values)==0: thiscol,prevcol = analyze_column(label, columns, thiscol, prevcol)
                 value = get_value(columns[thiscol])
@@ -339,12 +389,7 @@ class Finance(BaseParser):
                     })
                 else:
                     # assert label=='' or value=='' or any(['円' in x.text for x in columns]) or any([x.text.strip().startswith('当') for x in columns]) #'当連結会計年度' in value
-                    if any(['百万円' in x.text for x in columns]): # 単位：百万円 金額（百万円）
-                        unit = '000000'
-                    elif any(['千円' in x.text for x in columns]):
-                        unit = '000'
-                    elif any(['円' in x.text for x in columns]):
-                        unit = ''
+                    unit = analyze_unit(columns, unit)
                     # if value.startswith('当'): #'当連結会計年度' in value
                     if len(values)==0:
                         this_str = str(self.report_period_end_date.year)
@@ -352,3 +397,21 @@ class Finance(BaseParser):
                         thiscol, prevcol = analyze_title(columns, thiscol, prevcol, this_str, prev_str)
         headers = ['label','value','unit','indent','context','data_type','name','depth','consolidated','period']
         return pd.DataFrame(values, columns=headers).drop_duplicates(subset=['label', 'context'], keep='first')
+
+    def _get_fiscal_year_end_date_from_reporting_info(self) -> date:
+        """
+        Get fiscal year end date from reporting information
+        """
+        import calendar
+        def get_last_date_of_month(dt: date|datetime) -> date:
+            return dt.replace(day=calendar.monthrange(dt.year, dt.month)[1])
+
+        rped = self.report_period_end_date
+        kind:str = self.report_period_kind.value
+        if kind == "Q1":
+            return get_last_date_of_month(rped + timedelta(days=365*3/4))
+        elif kind == "Q2":
+            return get_last_date_of_month(rped + timedelta(days=365/2))
+        elif kind == "Q3":
+            return get_last_date_of_month(rped + timedelta(days=365/4))
+        return rped

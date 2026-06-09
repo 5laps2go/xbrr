@@ -36,17 +36,19 @@ class Reader(BaseReader):
 
         self.context_value_dic:dict[str, list[ElementValue]]
         self._role_dic = {}
-        self._context_dic = {}
+        self._context_dic:dict[str,dict[str,str]] = {}
         self._value_dic:dict[str, list[ElementValue]] = {}
         self._namespace_dic:dict[str, str] = {}
         self.schema_dic:SchemaDicts
         self.schema_tree:SchemaTree
         self._scans_presentation:list[BaseReader.PreTable|BaseReader.PreHeading] = []
+        self.epsilon_value:int = 0
 
         self.logger = getLogger(__name__)
         self.debug_print = []
     
         self.setup_initial_environment(save_dir)
+        Node.initialize_base_node()
 
     def __reduce_ex__(self, proto):
         return type(self), (self.xbrl_doc, self.taxonomy_repo, )
@@ -57,6 +59,10 @@ class Reader(BaseReader):
 
         self.schema_dic = self.taxonomy_repo.load_schema_files(self._namespace_dic)
         self.schema_tree = SchemaTree(self, self.xbrl_doc.find_path('xsd'))
+    
+    @property
+    def context_dic(self) -> dict[str,dict[str,str]]:
+        return self._context_dic
     
     @property
     def custom_roles(self) -> dict[str,RoleSchema]:
@@ -155,7 +161,7 @@ class Reader(BaseReader):
                     if cons_noncons:
                         locs_after_cons = locs_after_cons - 1
                     # tse-t-ed="http://www.xbrl.tdnet.info/jp/br/tdnet/t/ed/2007-06-30
-                    if item.endswith("IncomeStatementsInformationAbstract"):
+                    if table == '' and item.endswith("IncomeStatementsInformationAbstract"):
                         table = item
                         cons_noncons = role_name.split('/')[-1] + "Member"
                     # role_name=="http://www.xbrl.tdnet.info/jp/tse/tdnet/role/RoleAttachedDocument"
@@ -205,7 +211,7 @@ class Reader(BaseReader):
             contexts = {k:v for k,v in value.context_ref.items() if k.endswith("Axis")}
             if (consaxiss:=[k for k in dict if k.startswith("Consolidated")]):
                 if not any(["Consolidated" in k for k in contexts]):
-                    contexts[consaxiss[0]] = "ConsolidatedMember"
+                    contexts[consaxiss[0]] = "ConsolidatedMember" if 'NonConsolidated' not in value.context_ref['id'] else "NonConsolidatedMember"
             if set(dict.keys()) == set([x for x in contexts.keys() if x.endswith("Axis")]):
                 for key in dict:
                     if contexts[key] not in dict[key]:
@@ -224,7 +230,7 @@ class Reader(BaseReader):
             axis = axiss[0].name.split('_')[-1]
             axisdict[axis] = axisdict.get(axis,[]) + [member]
         # old style presentation does not have cons-noncons Axis, but value context may have cons-noncons Axis.
-        if not axisdict and role_link.startswith("http://info.edinet-fsa.go.jp/jp/fr/gaap/role/"):
+        if not axisdict and (role_link.startswith("http://info.edinet-fsa.go.jp/jp/fr/gaap/role/") or role_link.startswith("http://www.xbrl.tdnet.info/jp/br/tdnet/role/")):
             consaxis = "ConsolidatedOrNonConsolidatedAxis" if 'edinet' in role_link else "ConsolidatedNonconsolidatedAxis"
             axisdict[consaxis] = "NonConsolidatedMember" if "NonConsolidated" in role_link else "ConsolidatedMember"
 
@@ -232,6 +238,8 @@ class Reader(BaseReader):
         for key in nodes:
             if key not in self._value_dic or not (values:=[v for v in self._value_dic[key] if axis_member(axisdict,v)]):
                 continue
+            seen = []
+            values = [v for v in values if not (v.context_ref['id'] in seen or seen.append(v.context_ref['id']))] # remove duplicated context_ref id
             context_value_dic[key] = sorted(values, key=lambda x: x.context_ref['id']) # Current, Prior1, Prior2 order
         return context_value_dic
 
@@ -252,7 +260,9 @@ class Reader(BaseReader):
         if any(['period_start' in self._context_dic[x] for x in context_ids]):
             context_ids = sorted([x for x in context_ids if 'period_start' in self._context_dic[x]], key=lambda x: self._context_dic[x]['period_start'], reverse= False)
         sorted_context_ids = sorted(context_ids, key=lambda x: self._context_dic[x]['period'], reverse=True)
-        assert sorted_context_ids, "no context ids found"
+        if not sorted_context_ids:
+            self.logger.warn("No context ids found.")
+            return {}
 
         period_start = "2009-01-01"
         if 'period_start' in self._context_dic[sorted_context_ids[0]]:
@@ -279,11 +289,7 @@ class Reader(BaseReader):
             Node.epsilon_value = 0
             return
         eps1 = min([epsilon(float(x.value)) for x in moneys])
-
-        # decimals = set([x.decimals for x in moneys if x.decimals!=''])
-        # eps2 = epsilon2(list(decimals)[0])
-        # assert eps1 == eps2
-        Node.epsilon_value = eps1
+        self.epsilon_value = eps1
     
     def restructure_presentation(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
         self.clean_deleted_presentation(nodes)
@@ -306,12 +312,12 @@ class Reader(BaseReader):
         for name in parent_children:
             if name not in current_vdic: continue
             if len(parent_children[name]) >= 1:
-                nodes[name].mark_subtotal(parent_children[name], current_vdic)
+                nodes[name].mark_subtotal(parent_children[name], current_vdic, lambda x: epsval(self.epsilon_value, x))
 
     def patch_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], fix_cal_node:list[str]):
         self.eliminate_non_value_calc_leaf(nodes, context_value_dic)
 
-        if self.validate_calc_node_tree(context_value_dic, nodes):
+        if self.validate_calc_node_tree(context_value_dic, nodes, fix_cal_node):
             return
         
         # preserve_parents = set(sum(preserve_cal.values(),[]))
@@ -323,22 +329,38 @@ class Reader(BaseReader):
         self.fix_extra_calc_link(nodes, fix_cal_node, context_value_dic)
         self.fix_missing_calc_link(nodes, fix_cal_node, context_value_dic)
 
-    def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node]) -> bool:
+    def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], fix_cal_node:list[str]) -> bool:
         has_derived = False
         leaf_nodes = []
+        orphans = []
         for name in nodes:
             # NetIncome = nodes[name].no_derive() but not nodes[name].no_derived()
-            if nodes[name].no_derive() and cvalue(nodes[name], context_value_dic) != 0:
+            if nmmatch(name, fix_cal_node) and nodes[name].no_derive() and cvalue(nodes[name], context_value_dic) != 0:
                 if not leaf_nodes:
-                    leaf_nodes = sorted([nodes[n] for n in context_value_dic.keys()], key=lambda x: x.derivation_order)
+                    leaf_nodes = sorted([nodes[n] for n in context_value_dic.keys() if nmmatch(n, fix_cal_node)], key=lambda x: x.derivation_order)
                 ind = leaf_nodes.index(nodes[name])
                 if ind+1 < len(leaf_nodes) and not leaf_nodes[ind+1].no_derive():
                     if 'Attributable' in name: continue # jppfs_cor_ProfitLossAttributableToOwnersOfParent is 内訳 of ProfitLoss
-                    self.logger.debug("invalid calc node tree caused by {}".format(name))
+                    self.logger.debug("root(no derive) fix_cal_node found: {}".format(name))
                     return False
-            if nodes[name].has_derived():
+            if nmmatch(name, fix_cal_node) and nodes[name].no_derived():
+                self.logger.debug("No derived fix_cal_node found: {}".format(name))
+                return False
+            if nodes[name].no_derive() and nodes[name].has_derived():
+                for derived in nodes[name].get_derived():
+                    chain = derived.get_derive_chain()
+                    if not nmmatch(chain[-1].name, fix_cal_node):
+                        self.logger.debug("calc subtree with no fix_cal_node root found: {}".format(name))
+                        return False
+            if name in context_value_dic and nodes[name].no_derived() and nodes[name].no_derive() \
+                and not nodes[name].is_subtotal_fewer_or_extra_child(): # check 9064:2013-04-30
+                orphans.append(name)
+                if len(orphans) > 1:
+                    self.logger.debug("more than one orphan node found: {}".format(name))
+                    return False
+            if nodes[name].has_derived() and name in context_value_dic:
                 has_derived = True
-                if not nodes[name].validate(context_value_dic):
+                if not nodes[name].validate(context_value_dic, lambda x: epsval(self.epsilon_value, x)):
                     self.logger.debug("invalid calc node tree caused by {}".format(name))
                     return False
         return has_derived
@@ -413,7 +435,7 @@ class Reader(BaseReader):
         def make_missing_link(derived, orphans):
             if derived is None or not orphans:
                 return
-            derived_value, diff, epsilon = derived.cvalue(current_vdic)
+            derived_value, diff, epsilon = derived.cvalue(current_vdic, lambda x: epsval(self.epsilon_value, x))
             if abs(diff) < epsilon and (not orphans or (nmmatch(orphans[0].name, fix_cal_node))): # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 return
             orphan_values = [cvalue0(x, current_vdic) for x in orphans]
@@ -423,7 +445,8 @@ class Reader(BaseReader):
                 if len(pat) > len(orphans): continue
                 pat2 = list(pat) + [0] * (len(orphans) - len(pat))
                 vs = [pat2[i]*orphan_values[i] for i in range(len(pat2))]
-                has_unnecessary_derived = derived.has_derived() and abs(sum(vs)-derived_value) < epsilon
+                has_unnecessary_derived = derived.has_derived() and abs(sum(vs)-derived_value) < epsilon \
+                    and derived.cweight() - 1 <= sum([abs(pat2[i])*orphans[i].cweight() for i in range(len(pat2))]) # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 if abs(sum(vs)+diff) <= epsilon or has_unnecessary_derived:
                     removed = []
                     if has_unnecessary_derived: # 1853:2015-08-07: GrossProfit has several gross profits calc link
@@ -435,29 +458,31 @@ class Reader(BaseReader):
                             self.logger.debug("!{} --> {}:w{}".format(derived.name, orphans[i].name, pat[i]))
                             orphans[i].add_derive(derived, '', '0', '1', str(pat2[i]))
                             if not nmmatch(orphans[i].name, fix_cal_node) and( len([x for x in pat2[i:] if x==0])>0 or removed):
-                                orphans_sub = removed+[orphans[i] for i in range(i,len(pat2)) if pat2[i]==0] if i+1!=len(pat2) \
-                                    else orphans[i+1:] if len(orphans)>len(pat2) else []
+                                def next_zero(i, list):
+                                    return range(i+1, next((j+i+1 for j,x in enumerate(list[i+1:]) if x!=0), len(list)))
+                                orphans_sub = removed+[orphans[i] for i in next_zero(i,pat2)]
                                 ordered_orphans_sub = sorted(orphans_sub, reverse=True, key=lambda x: x.derivation_order)
                                 make_missing_link(orphans[i], ordered_orphans_sub)
                     break
-        def test_branchs(node, cal_nodes):
-            return node in cal_nodes and not node.no_derive()
+        def test_branchs(node:Node, cal_nodes:list[str]):
+            return node.name in cal_nodes and not node.no_derive()
 
-        cal_nodes = [v for k,v in nodes.items() if k in current_vdic and nmmatch(k, fix_cal_node)]
+        cal_nodes = nmshortest_match(list(current_vdic.keys()), fix_cal_node)
         candidates = [v for k,v in nodes.items() if test_branchs(v, cal_nodes) or v.need_to_derive_value(current_vdic, fix_cal_node)]
         ordered_candidates = sorted(candidates, reverse=True, key=lambda x: x.derivation_order)
         for missing in ordered_candidates:
             if nmmatch(missing.name, fix_cal_node):
                 derived = missing
+                # orphans = [o for o in ordered_candidates[ordered_candidates.index(derived)+1:] if not derived.has_derived_from(o)]
                 orphans = ordered_candidates[ordered_candidates.index(derived)+1:]
                 make_missing_link(derived, orphans)
     
     def fix_extra_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], current_vdic:dict[str,ElementValue]):
         def eliminate_extra_link(node):
             derives = sorted([v for v in node.get_derived() if v.name in current_vdic], reverse=True, key=lambda x: x.derivation_order)
-            node_value, diff, epsilon = node.cvalue(current_vdic)
+            node_value, diff, epsilon = node.cvalue(current_vdic, lambda x: epsval(self.epsilon_value, x))
             if abs(diff) < epsilon or node_value+diff==0:
-                for remove in node.validate_or_remove_derive_children(current_vdic):
+                for remove in node.validate_or_remove_derive_children(current_vdic, lambda x: epsval(self.epsilon_value, x)):
                     self.logger.debug("#validate_or_remove_derive_children: {} X-> all".format(remove.name))
                 return
             # found extra derives
@@ -493,13 +518,13 @@ class Reader(BaseReader):
                 continue
             # children make subtotal
             parent_node = nodes[parent_name]
-            if parent_node.validate(current_vdic):
+            if parent_node.validate(current_vdic, lambda x: epsval(self.epsilon_value, x)):
                 continue
             # parent derives one of children:  64690 放電精密　　　　　　　　　　2012-04-03 16:30:00: 平成24年2月期 決算短信[日本基準](連結)
             if parent_node.is_subtotal() and parent_node.get_derive() in children:
                 parent_node.remove_subtotal()
                 continue
-            if len(children)>1 and nodes[parent_name].compare_subtotal(children, current_vdic)==0:
+            if len(children)>1 and nodes[parent_name].compare_subtotal(children, current_vdic, lambda x: epsval(self.epsilon_value, x))==0:
                 for child in [x for x in children if not x.has_derive(nodes[parent_name])]:
                     self.logger.debug("#{} --> {}:w{}".format(parent_name, child.name,'1'))
                     child.add_derive(nodes[parent_name], '', '0', '1', str(1))
@@ -544,7 +569,7 @@ class Reader(BaseReader):
     
     def flatten_to_schemas(self, nodes:dict[str,Node]) -> DataFrame:
         schemas = []
-        Node.init_derive_path()
+        children_dict:dict[Node,list[Node]] = {}
 
         parent_depth = -1
         for name in nodes:
@@ -575,7 +600,7 @@ class Reader(BaseReader):
                 item[f"parent_{i}_order"] = order
 
             item["order"] = empty_order
-            item["depth"] = n.get_derive_path()
+            item["depth"] = n.get_derive_path(children_dict)
 
             item.update(n.element.to_dict())
             schemas.append(item)
@@ -692,12 +717,12 @@ class Reader(BaseReader):
 
 
 class Node():
-    epsilon_value = 0
+    base_node:Optional[Node] = None
 
     @classmethod
-    def init_derive_path(cls):
-        Node.children_list = {}
-        Node.base_node = Node(ElementSchema())
+    def initialize_base_node(cls):
+        if cls.base_node is None:
+            Node.base_node = cls(ElementSchema())
 
     class Marker(Enum):
         subtotal = auto()
@@ -852,7 +877,10 @@ class Node():
         if self.is_subtotal():
             return True
         if target.derivation_order < self.derivation_order:
-            return False
+            if target in self.get_derived(): # loop check
+                return False
+            if target.is_subtotal_with_fewer_children(): # subtotal relationship check 9064:2013-04-30
+                return False
         return True
 
     def is_subtotal_and_derived_children(self, target:Node) -> bool:
@@ -889,37 +917,43 @@ class Node():
     
     def omit_deleted_derives(self):
         return
-    
-    def cvalue(self, current_vdic:dict[str,ElementValue]) -> tuple[float,float,int]:
+
+    def cweight(self):
+        weight = 0
+        for n in self.clinks.active_dst_nodes():
+            weight += n.cweight()
+        return weight + 1
+        
+    def cvalue(self, current_vdic:dict[str,ElementValue], epsval:Callable[[list[float]],int]) -> tuple[float,float,int]:
         value = cvalue(self, current_vdic)
         to_target = self.clinks.active_dst_nodes()
         calc_values = subtotal(self, to_target, current_vdic)
         diff = sum(calc_values) - value
-        epsilon = epsvalue(current_vdic.get(self.name,None), calc_values)
+        epsilon = epsval(calc_values)
         return value, diff, epsilon
     
-    def validate(self, current_vdic:dict[str, ElementValue]) -> bool:
-        value, diff, epsilon = self.cvalue(current_vdic)
+    def validate(self, current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]) -> bool:
+        value, diff, epsilon = self.cvalue(current_vdic, epsval)
         return abs(diff) < epsilon
     
-    def validate_or_remove_derive_children(self, current_vdic:dict[str, ElementValue]):
+    def validate_or_remove_derive_children(self, current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]):
         removed = []
         for node in self.clinks.active_dst_nodes():
-            value,diff,e = node.cvalue(current_vdic)
+            value,diff,e = node.cvalue(current_vdic, epsval)
             if abs(diff) > e:
                 if node.remove_derive_children():
                     removed.append(node)
         return removed
 
-    def compare_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue]) -> int:
+    def compare_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]) -> int:
         if current_vdic[self.name].unit not in ['JPY','USD']: # TODO: it must be len()!=3 or format!='numdotdecimals'
             return False
         result = cvalue(self, current_vdic)
         calc_values = subtotal(self, children, current_vdic)
         sum_value = sum(calc_values)
-        if abs(sum_value - result) < epsvalue(current_vdic.get(self.name,None), calc_values):
+        if abs(sum_value - result) < epsval(calc_values):
             return 0
-        if sum_value - result >= epsvalue(current_vdic.get(self.name,None), calc_values):
+        if sum_value - result >= epsval(calc_values):
             return 1
         return -1
 
@@ -941,7 +975,7 @@ class Node():
         active_chains = [[x, *x._get_derive_chain(path)] for x
             in from_target if x not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
-        if len(sorted_chains) > 1: print("!!! get_derive_chain:",sorted_chains)
+        # if len(sorted_chains) > 1: print("!!! get_derive_chain:",sorted_chains)
         return sorted_chains[0] if len(sorted_chains) > 0 else []
 
     def has_derive(self, target:Node) -> list[Link]:
@@ -958,6 +992,9 @@ class Node():
             link = derive_links[0]
             link.set_properties(link.use, link.priority, -1)
 
+    def has_derived_from(self, source:Node) -> bool:
+        return any(l.is_link(self, source) for l in self.clinks.active_dst)
+
     def has_derived(self) -> bool:
         return len(self.clinks.active_dst) > 0
     
@@ -970,7 +1007,7 @@ class Node():
     def need_to_derive_value(self, current_vdic:dict[str, ElementValue], fix_cal_node:list[str]):
         parents = self.get_parent()
         # omit quasi subtotal that subtotal is not fix_cal_node
-        if self.is_subtotal_fewer_children() and not nmmatch(parents[0].name, fix_cal_node): # requires not nmmatch: 64180 日金銭　　　　　　　　　　　2014-02-12 15:30:00: 平成26年3月期 第3四半期決算短信
+        if self.is_subtotal_fewer_child() and not nmmatch(parents[0].name, fix_cal_node): # requires not nmmatch: 64180 日金銭　　　　　　　　　　　2014-02-12 15:30:00: 平成26年3月期 第3四半期決算短信
             return False
         return self.no_derive() and self.name in current_vdic
 
@@ -979,8 +1016,8 @@ class Node():
             return False
         return any([t(x.name) in preserve_parent_names for x in self.get_derive_chain()])
     
-    def mark_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue]):
-        comparison = self.compare_subtotal(children, current_vdic)
+    def mark_subtotal(self, children:list[Node], current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]):
+        comparison = self.compare_subtotal(children, current_vdic, epsval)
         plinks = self.plinks.active_src         # TODO: it is not necessary
         if not plinks:
             return
@@ -991,9 +1028,15 @@ class Node():
         else:
             self.marker = Node.Marker.subtotal_with_fewer_children  # this is the subtotal but not enough children have
 
-    def is_subtotal_fewer_children(self) -> bool:
+    def is_subtotal_fewer_child(self) -> bool:
         parents = self.get_parent()
         if parents and parents[0].is_subtotal_with_fewer_children():
+            return True
+        return False
+    
+    def is_subtotal_fewer_or_extra_child(self) -> bool:
+        parents = self.get_parent()
+        if parents and parents[0].is_subtotal_with_fewer_or_extra_children():
             return True
         return False
     
@@ -1003,32 +1046,35 @@ class Node():
     def is_subtotal_with_fewer_children(self) -> bool:
         return self.marker in [Node.Marker.subtotal_with_fewer_children]
 
-    def get_child_index(self, child) -> str:
-        children = Node.children_list.get(self, [])
+    def is_subtotal_with_fewer_or_extra_children(self) -> bool:
+        return self.marker in [Node.Marker.subtotal_with_fewer_children, Node.Marker.subtotal_with_extra_children]
+
+    def get_child_index(self, child, children_dict:dict[Node,list[Node]]) -> str:
+        children = children_dict.get(self, [])
         if child not in children:
             children.append(child)
-            Node.children_list[self] = children
+            children_dict[self] = children
         child_index = children.index(child)
         return '123456789abcdefghijklmnopqrstuvwxyz'[child_index] if child_index < 35 else '0'
 
-    def get_derive_subpath(self) -> list[tuple[str,Literal['1','-1']]]:
-        return self._get_derive_subpath([])
-    def _get_derive_subpath(self, path0) -> list[tuple[str,Literal['1','-1']]]:
+    def get_derive_subpath(self, children_dict:dict[Node,list[Node]]) -> list[tuple[str,Literal['1','-1']]]:
+        return self._get_derive_subpath([], children_dict)
+    def _get_derive_subpath(self, path0, children_dict:dict[Node,list[Node]]) -> list[tuple[str,Literal['1','-1']]]:
         path = path0 + [self]
         if len(self.clinks.src)==0 and self.element.data_type in ['monetary','perShare']:
-            return [(Node.base_node.get_child_index(self),'1')]
+            return [(Node.base_node.get_child_index(self, children_dict), '1')]
         derives = [(l.l_from,str(l.weight)) for l in self.clinks.active_src]
-        active_chains = [[(x.get_child_index(self), w), *x._get_derive_subpath(path)] for (x,w)
+        active_chains = [[(x.get_child_index(self, children_dict), w), *x._get_derive_subpath(path, children_dict)] for (x,w)
             in derives if x not in path]
         sorted_chains = sorted(active_chains, key=len, reverse=True)
-        return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self),'1')]
+        return sorted_chains[0] if len(sorted_chains) > 0 else [(Node.base_node.get_child_index(self, children_dict),'1')]
 
-    def get_derive_path(self) -> str:
+    def get_derive_path(self, children_dict:dict[Node,list[Node]]) -> str:
         def sum_sign(path):
             signs = [x[1].startswith('-') for x in path]
             pairs = [signs[i] and signs[i+1] for i in range(len(signs)-1)]
             return sum(signs) #- 2*sum(pairs) in some 2024,2023,2022,2021
-        path = self.get_derive_subpath()
+        path = self.get_derive_subpath(children_dict)
         sign = sum_sign(path)
         sign_str = ('-' if sign%2==1 else '*') if sign>0 else '+'
         path_str = ''.join([x[0] for x in path])
@@ -1108,11 +1154,13 @@ def epsilon(value) -> int:
 def epsilon2(decimal:str) -> int:
     return 10**abs(int(decimal))
 
-def epsvalue(ev:Optional[ElementValue], values) -> int:
-    return Node.epsilon_value * (len(values)+2)
+def epsval(epsilon_value:int, values) -> int:
+    return epsilon_value * (len(values)+2)
 
 def cvalue(node:Node, vdic) -> float:
     if node.name not in vdic or '円' in vdic[node.name].value:
+        if node.has_derived():  # no value calc link found: 1764:2018-02-39
+            return sum([v.get_weight(node) * cvalue(v, vdic) for v in node.get_derived()])
         return 0.
     return float(vdic[node.name].value)
 def cvalue0(node:Node, vdic) -> float:
@@ -1132,7 +1180,7 @@ def t(name:str) -> str:
 def nmmatch(tagname:str, matcher:list[str]) -> bool:
     name = t(tagname)
     simple, complex = [],[]
-    for x in [x for x in matcher]:
+    for x in matcher:
         (simple, complex)[x[0] in '<~>'].append(x)
     if name in simple:
         return True
@@ -1148,3 +1196,12 @@ def nmmatch1(name:str, matcher:str) -> bool:
     if matcher[0]=='~':
         return re.search(matcher[1:], name) is not None
     return name==matcher
+
+def nmshortest_match(names:list[str], matcher:list[str]) -> list[str]:
+    results:set = set()
+    for m in matcher:
+        matchs = [name for name in names if nmmatch(name, [m])]
+        if matchs:
+            shortest_name = min(matchs, key=lambda x: len(t(x)))
+            results.add(shortest_name)
+    return list(results)
