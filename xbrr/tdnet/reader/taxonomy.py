@@ -16,6 +16,7 @@ class Taxonomy(BaseTaxonomy):
         "2008-02-01": "http://www.xbrl.tdnet.info/download/taxonomy/tse-o-di-2008-02-01.zip",
         "2014-01-12": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/61_taxonomy.zip",
         "2025-01-31": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/TDnet_Quarterly_Financial_Statements_Taxonomy.zip",
+        "2026-01-31": "https://www.jpx.co.jp/equities/listing/disclosure/xbrl/nlsgeu000005vk0b-att/TDnet_Quarterly_Financial_Statements_Taxonomy.zip",
     }
 
     def __init__(self, taxonomy_root):
