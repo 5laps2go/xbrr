@@ -29,6 +29,11 @@ class Forecast(BaseParser):
         'sm_bs': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
         'sm_cf': ['ConsolidatedIncomeStatementsInformationAbstract','IncomeStatementsInformationAbstract'],
     }
+    tse_re_t_table_candiates: dict[str, list[str]] = {
+        'fc': ['ForecastCorrectionOfOperatingResultsREITTable'],
+        'fc_dividends': ['RevisedDistributionForecastREITTable'],
+        'sm_pl': [], 'sm_bs': [], 'sm_cf': [],
+    }
 
     def __init__(self, reader:Reader):
         def gen_report_period_kind(m:re.Match[str]) -> str:
@@ -81,8 +86,12 @@ class Forecast(BaseParser):
             "security_code": "tse-re-t:SecuritiesCode",
             "company_name": "tse-re-t:IssuerNameREIT",
 
+            "fiscal_date_end": "tse-re-t:FiscalYearEnd",
             "filling_date": "tse-re-t:FilingDate",
-            "forecast_correction_date": "tse-ed-t:ReportingDateOfFinancialForecastCorrection",
+            "forecast_correction_date": "tse-re-t:ReportingDateOfFinancialForecastCorrection",
+            "forecast_correction_flag": "tse-re-t:ReportingDateOfFinancialForecastCorrection",
+
+            "consolidation_scope_changes_flag": "", "consolidation_scope_changes_flagUS": "", "consolidation_scope_changes_flagIFRS": "",
         }
         if "tse-ed-t" in reader.namespaces:
             super().__init__(reader, ElementValue, tags)
@@ -91,7 +100,7 @@ class Forecast(BaseParser):
         elif "tse-re-t"in reader.namespaces:
             super().__init__(reader, ElementValue, reit_tags)
             self.namespace_prefix = 'tse-re-t'
-            self.table_candidates = self.tse_ed_t_table_candiates
+            self.table_candidates = self.tse_re_t_table_candiates
         elif "tse-t-ed" in reader.namespaces:
             super().__init__(reader, ElementValue, tse_t_ed_tags)    # for old tdnet
             self.namespace_prefix = 'tse-t-ed'
@@ -108,7 +117,7 @@ class Forecast(BaseParser):
             self.__consolidated = '連結' == m.group(6)
             self.report_period_kind = gen_report_period_kind(m) # don't know which forecast contained
             self.accounting_standards = m.group(4)
-        elif ('業績予想' in title or '配当予想' in title or '配当の予想' in title):
+        elif ('業績予想' in title or '速報' in title or '配当予想' in title or '配当' in title or '予定' in title or '分配金の予想' in title):
             m = re.search(r'(第(.)四半期|中間)', title)
             if m is not None:   # 9691: 2024年３月期第２四半期連結累計期間業績予想の修正に関するお知らせ
                 self.report_period_kind = gen_report_period_kind(m)
