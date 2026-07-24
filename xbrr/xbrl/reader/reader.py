@@ -433,10 +433,17 @@ class Reader(BaseReader):
 
     def fix_missing_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], current_vdic:dict[str,ElementValue]):
         def make_missing_link(derived, orphans):
+            def orphans_has_derivelink_to_derived(derived, orphans):
+                if nmmatch(derived.name, fix_cal_node):
+                    first_fix_cal_node = next((o for o in orphans if nmmatch(o.name, fix_cal_node)), None)
+                    return first_fix_cal_node is not None and derived==first_fix_cal_node.get_derive()
+                else:
+                    return nmmatch(orphans[0].name, fix_cal_node)
+                
             if derived is None or not orphans:
                 return
             derived_value, diff, epsilon = derived.cvalue(current_vdic, lambda x: epsval(self.epsilon_value, x))
-            if abs(diff) < epsilon and (not orphans or (nmmatch(orphans[0].name, fix_cal_node))): # 1853:2015-08-07: GrossProfit has several gross profits calc link
+            if abs(diff) < epsilon and (not orphans or orphans_has_derivelink_to_derived(derived, orphans)): # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 return
             orphan_values = [cvalue0(x, current_vdic) for x in orphans]
             for pat in [[1], [-1], [1,1], [-1,1], [-1,0,1], [-1,1,1], [0,-1,1], [-1,-1,1], [1,-1,1],
@@ -446,7 +453,7 @@ class Reader(BaseReader):
                 pat2 = list(pat) + [0] * (len(orphans) - len(pat))
                 vs = [pat2[i]*orphan_values[i] for i in range(len(pat2))]
                 has_unnecessary_derived = derived.has_derived() and abs(sum(vs)-derived_value) < epsilon \
-                    and derived.cweight() - 1 <= sum([abs(pat2[i])*orphans[i].cweight() for i in range(len(pat2))]) # 1853:2015-08-07: GrossProfit has several gross profits calc link
+                    and derived.cweight() - 1 <= sum([abs(pat2[i])*(orphans[i].cweight()-1) for i in range(len(pat2))]) # 1853:2015-08-07: GrossProfit has several gross profits calc link
                 if abs(sum(vs)+diff) <= epsilon or has_unnecessary_derived:
                     removed = []
                     if has_unnecessary_derived: # 1853:2015-08-07: GrossProfit has several gross profits calc link
@@ -1020,6 +1027,8 @@ class Node():
         comparison = self.compare_subtotal(children, current_vdic, epsval)
         plinks = self.plinks.active_src         # TODO: it is not necessary
         if not plinks:
+            return
+        if any([x.name not in current_vdic or current_vdic[x.name].value=='NaN' for x in children]): # 43190:2022-02-07 has NaN children but not subtotal
             return
         if comparison == 0:
             self.marker = Node.Marker.subtotal                      # this is the subtotal as parent

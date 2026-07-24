@@ -23,7 +23,7 @@ class Doc(XbrlDoc):
             return []
         def _xbrl_file(root_dir, kind):
             patn_dict = {'public': ['**/tse-??????fr-*.xsd', '**/tdnet-??????fr-*.xsd'],
-                         'summary': ['**/tse-??????s[my]-*.xsd','**/tse-rv??-*.xsd','**/tdnet-??????sm-*.xsd']}
+                         'summary': ['**/tse-??????s[my]-*.xsd','**/tse-rv??-*.xsd','**/tdnet-??????sm-*.xsd']} # tse-rr??: for REIT only
             xsd_files = _glob_list(patn_dict[kind])
             if not xsd_files:
                 raise FileNotFoundError(
