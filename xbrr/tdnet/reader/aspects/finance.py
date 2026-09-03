@@ -2,6 +2,7 @@ from math import e
 from typing import Optional, Literal, Callable, cast
 
 from datetime import date, datetime, timedelta
+import os
 import calendar
 import collections
 import importlib
@@ -9,7 +10,7 @@ import importlib.util
 import itertools
 import re
 import warnings
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import pandas as pd
 from logging import getLogger
 
@@ -104,11 +105,128 @@ class Finance(BaseParser):
         return self.reader.xbrl_doc.consolidated
 
     def bs(self, latest2year=False) -> DataFrame:
+        def convert_parallel_bs_to_serial(soup:BeautifulSoup):
+            # soup = BeautifulSoup(html_content, 'html.parser')
+            table = soup.find('table')
+            
+            if not table:
+                return "テーブルが見つかりませんでした。"
+
+            rows = table.find_all('tr')
+            
+            # ----------------------------------------------------
+            # 1. 並列記載（横並び）の判定
+            # ----------------------------------------------------
+            is_parallel = False
+            for row in rows:
+                text = row.get_text()
+                # 資産合計と負債・資本合計が同じ行に含まれているかチェック
+                if '資産合計' in text and '負債・資本合計' in text:
+                    is_parallel = True
+                    break
+                    
+            if not is_parallel:
+                return
+            
+            self.logger.warning("【判定結果】並列記載のBSであることを検出しました。直列に変換します。")
+
+            # ----------------------------------------------------
+            # 2. 入力テーブルのヘッダー行から情報を動的に抽出
+            # ----------------------------------------------------
+            # 通常、並列BSのヘッダーは1行目（大分類）や2行目（科目・日付）にあります。
+            # 3行目以降からデータが始まると仮定し、最初の2行からヘッダー情報を動的に取得します。
+            
+            # 日付や「科目」という列名が含まれる詳細ヘッダー行（通常2行目）から動的に取得
+            dynamic_headers = ["科目", "前結会計年度末", "当連結会計期間末"] # フォールバック用
+            if len(rows) > 1:
+                second_row_cols = [td.get_text(strip=True) for td in rows[1].find_all(['td', 'th'])]
+                # 左側（資産側）の3列分をそのまま新テーブルのヘッダーとして抽出
+                if len(second_row_cols) >= 3:
+                    dynamic_headers = second_row_cols[:3]
+
+            # ----------------------------------------------------
+            # 3. データの抽出と分離
+            # ----------------------------------------------------
+            assets_data = []      # 左側：資産の部
+            liabilities_data = [] # 右側：負債・資本の部
+            
+            # ヘッダー情報の取得（最初の2行を想定）
+            header_rows = rows[:2]
+            
+            # データ行の処理
+            for row in rows[2:]:
+                cols = [td.get_text(strip=True) for td in row.find_all(['td', 'th'])]
+                
+                # 横並びの列数が十分にない場合はスキップまたは特殊処理
+                if len(cols) < 6:
+                    continue
+                    
+                # 左側（資産）: 科目, 前期末, 当期末
+                asset_item = cols[0]
+                asset_val1 = cols[1]
+                asset_val2 = cols[2]
+                
+                # 右側（負債・資本）: 科目, 前期末, 当期末
+                liab_item = cols[3]
+                liab_val1 = cols[4]
+                liab_val2 = cols[5]
+                
+                # 空白行でなければそれぞれのリストに追加
+                if asset_item:
+                    assets_data.append([asset_item, asset_val1, asset_val2])
+                if liab_item:
+                    liabilities_data.append([liab_item, liab_val1, liab_val2])
+
+            # ----------------------------------------------------
+            # 4. 直列（縦並び）HTMLテーブルの再構築
+            # ----------------------------------------------------
+            new_soup = BeautifulSoup('<table></table>', 'html.parser')
+            new_table = new_soup.table
+            
+            # 共通ヘッダー（科目、2024年3月31日、2024年9月30日）を生成
+            # ※元のヘッダーから適切な期間名などを抽出して設定するとより正確になります
+            thead = new_soup.new_tag('tr')
+            for h_text in dynamic_headers:
+                th = new_soup.new_tag('th')
+                th.string = h_text
+                thead.append(th)
+            new_table.append(thead)
+
+            # --- 資産の部 ---
+            for row_data in assets_data:
+                tr = new_soup.new_tag('tr')
+                for val in row_data:
+                    td = new_soup.new_tag('td')
+                    p = new_soup.new_tag('p')
+                    p.string = val
+                    td.append(p)
+                    tr.append(td)
+                new_table.append(tr)
+
+            # --- 負債・資本の部 ---
+            for row_data in liabilities_data:
+                tr = new_soup.new_tag('tr')
+                for val in row_data:
+                    td = new_soup.new_tag('td')
+                    p = new_soup.new_tag('p')
+                    p.string = val
+                    td.append(p)
+                    tr.append(td)
+                new_table.append(tr)
+
+            table.insert_after(new_table)  # 新しいテーブルを挿入
+            table.decompose()  # 元のテーブルを削除
+            return soup
+
         role_uri = self.find_role_name('bs', latest2year)
         if not role_uri:
             textblock = self.read_value_by_textblock('bs')
-            return self.__read_finance_statement(textblock.html) if textblock is not None\
-                else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
+            if textblock is None:
+                self.logger.warning("BSのテキストブロックが見つかりませんでした。")
+                return pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
+            soup = textblock.html
+            convert_parallel_bs_to_serial(soup)
+            return self.__read_finance_statement(soup)
 
         bs = self.reader.read_value_by_role(role_uri, report_end=self.report_period_end_date)
         return self.__df_instant(bs, latest2year)
@@ -134,12 +252,156 @@ class Finance(BaseParser):
         role_uri = self.find_role_name('cf', latest2year)
         if not role_uri:
             textblock = self.read_value_by_textblock('cf')
-            return self.__read_finance_statement(textblock.html) if textblock is not None\
+            if textblock is not None:
+                return self.__read_finance_statement(textblock.html)
+            
+            cf_note_df = self.cf_note(latest2year)
+            return cf_note_df if cf_note_df is not None\
                 else pd.DataFrame(columns=['label', 'value', 'unit', 'context', 'data_type', 'name', 'depth', 'consolidated'])
 
         cf = self.reader.read_value_by_role(role_uri, report_start=self.fiscal_year_start_date, report_end=self.report_period_end_date)
         return self.__df_duration_from_fiscal_year_start_date(cf, latest2year)
 
+    def cf_note(self, latest2year=False) -> Optional[DataFrame]:
+        """四半期決算短信のHTMLからキャッシュ・フロー注記の減価償却費を抽出する
+
+        Returns:
+            DataFrame | None: 抽出された減価償却費を含むCF中期のDataFrame。見つからない場合はNone。
+        """
+        def item_and_parents_next_siblings(element):
+            # 1. 現在の要素を返す
+            yield element
+            # 2. まず現在の要素の次の兄弟を返す
+            for sib in element.next_siblings:
+                if isinstance(sib, Tag):
+                    yield sib
+            # 3. 親を遡りながら、それぞれの次の兄弟を返す
+            for parent in element.parents:
+                if parent.name == '[document]':
+                    break
+                for sib in parent.next_siblings:
+                    if isinstance(sib, Tag):
+                        yield sib
+
+        def unnest_tables(soup, outer_table):
+            # soup = BeautifulSoup(html_content, 'html.parser')
+            main_table = outer_table
+            
+            if not main_table:
+                return
+
+            # 親table内の各行を処理
+            # (親の直下trのみを取得するために recursive=False または親要素をチェック)
+            parent_trs = [tr for tr in main_table.find_all('tr') if tr.find_parent('table') == main_table]
+
+            for tr in parent_trs:
+                # この行の中に含まれる入れ子テーブルを探す
+                nested_tables = tr.find_all('table')
+                
+                if not nested_tables:
+                    continue  # 入れ子テーブルがなければそのまま
+                    
+                # 入れ子テーブルの「最大行数」を算出
+                # (行数が崩れていない＝すべての入れ子テーブルの行数は同じはずですが、念のため取得)
+                max_nested_rows = max(len(table.find_all('tr')) for table in nested_tables)
+                
+                # 展開用の新しい行（<tr>）のリストを作成
+                expanded_trs = [soup.new_tag('tr') for _ in range(max_nested_rows)]
+                
+                # 親行（tr）内の直下のセル（td / th）を順番に処理
+                cells = tr.find_all(['td', 'th'], recursive=False)
+                for cell in cells:
+                    nested_table = cell.find('table')
+                    
+                    if nested_table:
+                        # --- セルの中に入れ子テーブルがある場合 ---
+                        nested_rows = nested_table.find_all('tr')
+                        for i, n_tr in enumerate(nested_rows):
+                            # 入れ子テーブルの各行からすべてのtd/thを取得し、新行に追加
+                            for n_cell in n_tr.find_all(['td', 'th'], recursive=False):
+                                expanded_trs[i].append(n_cell.extract())
+                    else:
+                        # --- 通常のセルの場合 ---
+                        # 入れ子テーブルの行数分縦結合（rowspan）させるか、最初の行に配置して残りを空ける処理
+                        # ここでは最初の行に元のセルを入れ、残りの行にはrowspanを設定
+                        cell['rowspan'] = str(max_nested_rows)
+                        expanded_trs[0].append(cell.extract())
+                        
+                # 元の親行（tr）を、展開した複数行（expanded_trs）に置換
+                for new_tr in reversed(expanded_trs):
+                    tr.insert_after(new_tr)
+                tr.decompose()  # 元の親行を削除
+
+        # 1. ファイルの存在確認と読み込み
+        qualitative_soup = self.reader.xbrl_doc.read_file("qualitative.htm")
+
+        cf_title_pattern = re.compile(r"キャッシュ・フロー(計算書)?(に関する注記|関係)") # 関係:3222,8570,8628,2220,9502,1965  計算書なし:4413,414A,8697,6617
+        cf_nodepre_pattern = re.compile(r"減価償却費[^。]*(ありません。|記載を省略|発生しておりません。)")
+
+        target_heading = None
+        # 2. ターゲットとなる見出しを下から探す（目次スキップのため）
+        for heading in qualitative_soup.find_all(["h1", "h2", "h3", "h4", "p", "div"])[::-1]:
+            text = heading.get_text(strip=True)
+
+            # 「四半期キャッシュ・フロー計算書に関する注記」を含み、かつ目次の特徴（目次という単語やリーダー線）を持たないものを選択
+            if cf_title_pattern.search(text):
+                if "目次" in text or "…" in text or "..." in text:
+                    continue  # 目次用の行ならスキップ
+                target_heading = heading
+                break
+
+        if not target_heading:
+            if self.report_period_end_date.year >= 2025:
+                self.logger.warning("本文内のキャッシュ・フロー計算書に関する注記」セクションが見つかりませんでした。")
+            return None
+
+        # 2. 後続にTableがある場所を正確に探す
+        for elem in item_and_parents_next_siblings(target_heading):
+            if elem.find_all(['table']):
+                target_heading = elem
+                break
+            if cf_nodepre_pattern.search(re.sub(r"[\(（][^)）]*?[\)）]","",elem.get_text())): # 4424:2026-02-12 セクションはあるがTableが無い場合,TODO 減価償却費を０（今回、前回）にする
+                target_heading = None
+                break
+
+        if not target_heading:
+            self.logger.warning("本文内のキャッシュ・フロー計算書に関する注記」Tableが見つかりませんでした。")
+            prioryear = self.report_period_end_date.year - 1
+            priordate = date(year=prioryear, month=self.report_period_end_date.month,
+                                day=calendar.monthrange(prioryear, self.report_period_end_date.month)[1]).strftime("%Y-%m-%d")
+            return pd.DataFrame(
+                [
+                    ["減価償却費", "0", "JPY", "0", "Prior1YTDDuration", "monetary","dummy", "1", True, priordate],
+                    ["減価償却費", "0", "JPY", "0", "CurrentYTDDuration","monetary","dummy", "1", True, self.report_period_end_date.strftime("%Y-%m-%d")]
+                ],
+                columns=['label','value','unit','indent','context','data_type','name','depth','consolidated','period']
+            )
+
+        # 1. すべての内側の表（table）をループ処理
+        outer_table = target_heading.find("table")
+        unnest_tables(qualitative_soup, outer_table)
+
+        # 3. 一つのセルに複数データを記載している場合は、TRで行を分離する
+        tbody = target_heading.find('tbody')
+        body = tbody if tbody else target_heading
+        # trの中のすべてのtdが2つ以上の同数のｐタグを持つ場合
+        for tr in body.find_all('tr'):
+            if all(len(td.find_all('p')) > 1 for td in tr.find_all('td')):
+                # brタグで分割して新しいtrを作成
+                new_trs = {}
+                for td in tr.find_all('td'):
+                    for i,p in enumerate(td.find_all('p')):
+                        new_tr = new_trs.setdefault(i, qualitative_soup.new_tag('tr'))
+                        new_td = qualitative_soup.new_tag('td')
+                        new_td.append(p)
+                        new_tr.append(new_td)
+                # 元のtrの直前に新しいtrを追加
+                for new_tr in new_trs.values():
+                    tr.insert_before(new_tr)
+                tr.decompose()
+
+        return self.__read_finance_statement(target_heading)
+    
     def __df_duration_from_fiscal_year_start_date(self, df:DataFrame, latest2year:bool) -> DataFrame:
         if 'context' in df.columns:
             fy_start = self.fiscal_year_start_date
@@ -253,6 +515,8 @@ class Finance(BaseParser):
         def myen(vtext, unit):
             if vtext in ['－', '-', '―'] or len(vtext)==0:
                 return ''
+            if vtext.endswith('円'):    # 円で終わるとき数字・カンマ以外を除去。unitはanalyze_unit_till_tableで取得済み
+                vtext = re.sub(r"[^\d,]", "", vtext)
             myen = vtext.translate(str.maketrans({',':None, '△':'-', '(': None, ')':None})) + unit # '△':'-': 99830:2019-04-11
             return myen
         def isnum(myen):
@@ -263,7 +527,7 @@ class Finance(BaseParser):
             else:
                 return True
         def label_margin(columns):
-            label = ''.join([x.text.strip() for x in columns[0].select('p')])
+            label = ''.join([re.sub(r"[\d,百万千円]","",x.text.strip()) for x in columns[0].select('p')])
             if label != '' and columns[0].get('colspan',"") == '': # column0 has label
                 style_str = columns[0].find('p').get('style',"") if label != "" else ""
                 m = re.match(r'.*-left: *([0-9]*).?[0-9]*p[tx].*', style_str)
@@ -307,7 +571,7 @@ class Finance(BaseParser):
         def analyze_column(label, columns, tc, pc):
             def adjust(columns, idx):
                 for i in range(3):
-                    if columns[idx+i].text.strip().replace(',','').isdigit():
+                    if re.sub(r"[,百万千円]","",columns[idx+i].text.strip()).isdigit():
                         return i
                 return 0
             if len(label) > 2 and not any([c in label for c in '([/#,.])']):
@@ -327,6 +591,7 @@ class Finance(BaseParser):
             list = []
             for elem in soup.find_all(True):
                 if elem.name == 'table':
+                    list.append(elem)
                     break
                 if elem.name is not None: list.append(elem)
             return analyze_unit(list, '000000')
@@ -334,7 +599,11 @@ class Finance(BaseParser):
         thiscol, prevcol = -1, -2
         unit = analyze_unit_till_table(statement_xml)
         values = []
-        for table in statement_xml.select('table'):
+        # 親（ancestors）に 'table' がないものだけを抽出
+        outer_tables = statement_xml.find_all(
+            lambda tag: tag.name == "table" and not tag.find_parent("table")
+        )
+        for table in outer_tables:
             if (thead := table.find('thead', recursive=False)):
                 for record in thead.find_all('tr', recursive=False):
                     columns = list(record.find_all('td', recursive=False))
