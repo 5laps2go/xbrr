@@ -130,7 +130,8 @@ class Forecast(BaseParser):
         elif ('業績' in title):
             self.report_period_kind = '0'
         else:
-            raise Exception("Unknown titile found!")
+            self.report_period_kind = '0'
+            # raise Exception("Unknown titile found!")
 
     def get_security_code(self):
         value = self.get_value("security_code")

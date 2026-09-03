@@ -193,7 +193,7 @@ class Reader(BaseReader):
             self.make_node_tree(nodes, role_link, docuri, linkbase['link_node'], linkbase['arc_node'], linkbase['arc_role'])
         self.context_value_dic = self.select_value_dic(nodes, role_link)
         current_vdic = self.current_value_dic(report_start, report_end)
-        self.restructure_presentation(nodes, current_vdic)
+        self.restructure_presentation(nodes, current_vdic, fix_cal_node)
 
         if list(self.schema_tree.linkbaseRef_iterator('cal')) != []:
             self.logger.debug("-------------- Section calculation ------------------")
@@ -291,9 +291,9 @@ class Reader(BaseReader):
         eps1 = min([epsilon(float(x.value)) for x in moneys])
         self.epsilon_value = eps1
     
-    def restructure_presentation(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
+    def restructure_presentation(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue], fix_cal_node:list[str]):
         self.clean_deleted_presentation(nodes)
-        self.mark_subtotal_as_parent(nodes, current_vdic)
+        self.mark_subtotal_as_parent(nodes, current_vdic, fix_cal_node)
 
     def clean_deleted_presentation(self, nodes:dict[str,Node]):
         for name,node in nodes.items():
@@ -304,13 +304,13 @@ class Reader(BaseReader):
         for name,node in nodes.items():
             node.omit_deleted_derives()
 
-    def mark_subtotal_as_parent(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue]):
+    def mark_subtotal_as_parent(self, nodes:dict[str,Node], current_vdic:dict[str,ElementValue], fix_cal_node:list[str]):
         parent_children = {}
         for node in nodes.values():
             if node.parent_name is None: continue
             parent_children[node.parent_name] = parent_children.get(node.parent_name, []) + [node]
         for name in parent_children:
-            if name not in current_vdic: continue
+            if name not in current_vdic or nmmatch(name, fix_cal_node): continue  # nmmatch():43190:2022-02-07 has NaN children but not subtotal
             if len(parent_children[name]) >= 1:
                 nodes[name].mark_subtotal(parent_children[name], current_vdic, lambda x: epsval(self.epsilon_value, x))
 
@@ -436,7 +436,7 @@ class Reader(BaseReader):
             def orphans_has_derivelink_to_derived(derived, orphans):
                 if nmmatch(derived.name, fix_cal_node):
                     first_fix_cal_node = next((o for o in orphans if nmmatch(o.name, fix_cal_node)), None)
-                    return first_fix_cal_node is not None and derived==first_fix_cal_node.get_derive()
+                    return first_fix_cal_node is not None and derived in first_fix_cal_node.get_derive_chain()
                 else:
                     return nmmatch(orphans[0].name, fix_cal_node)
                 
@@ -457,6 +457,7 @@ class Reader(BaseReader):
                 if abs(sum(vs)+diff) <= epsilon or has_unnecessary_derived:
                     removed = []
                     if has_unnecessary_derived: # 1853:2015-08-07: GrossProfit has several gross profits calc link
+                        self.logger.debug("{} X-> {}".format(derived.name, 'children'))
                         removed = derived.remove_derive_all_children(nodes.values())
                         if not removed: break
                         removed = [x for x in removed if x not in [orphans[i] for i in range(len(pat2)) if pat2[i]==1]]
@@ -1028,8 +1029,8 @@ class Node():
         plinks = self.plinks.active_src         # TODO: it is not necessary
         if not plinks:
             return
-        if any([x.name not in current_vdic or current_vdic[x.name].value=='NaN' for x in children]): # 43190:2022-02-07 has NaN children but not subtotal
-            return
+        # if any([x.name not in current_vdic or current_vdic[x.name].value=='NaN' for x in children]): # 43190:2022-02-07 has NaN children but not subtotal
+        #     return
         if comparison == 0:
             self.marker = Node.Marker.subtotal                      # this is the subtotal as parent
         elif comparison == 1:
