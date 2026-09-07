@@ -286,7 +286,7 @@ class Reader(BaseReader):
     def prepare_epsilon(self, current_vdic:dict[str,ElementValue]):
         moneys = [x for x in current_vdic.values() if x.data_type=='monetary' and x.value!='NaN']
         if not moneys:
-            Node.epsilon_value = 0
+            self.epsilon_value = 0
             return
         eps1 = min([epsilon(float(x.value)) for x in moneys])
         self.epsilon_value = eps1
