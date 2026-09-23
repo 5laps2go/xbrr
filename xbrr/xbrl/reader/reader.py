@@ -330,6 +330,9 @@ class Reader(BaseReader):
         self.fix_missing_calc_link(nodes, fix_cal_node, context_value_dic)
 
     def validate_calc_node_tree(self, context_value_dic:dict[str,ElementValue], nodes:dict[str,Node], fix_cal_node:list[str]) -> bool:
+        cal_nodes = nmshortest_match(list(nodes.keys()), fix_cal_node)
+        possibly_root = sorted(cal_nodes, reverse=True, key=lambda x: nodes[x].derivation_order)[0]
+
         has_derived = False
         leaf_nodes = []
         orphans = []
@@ -341,6 +344,7 @@ class Reader(BaseReader):
                 ind = leaf_nodes.index(nodes[name])
                 if ind+1 < len(leaf_nodes) and not leaf_nodes[ind+1].no_derive():
                     if 'Attributable' in name: continue # jppfs_cor_ProfitLossAttributableToOwnersOfParent is 内訳 of ProfitLoss
+                    if ind>0 and leaf_nodes[ind].name.startswith(leaf_nodes[ind-1].name): continue # GrossProfit and GrossProfitNetGP with no_derive() case
                     self.logger.debug("root(no derive) fix_cal_node found: {}".format(name))
                     return False
             if nmmatch(name, fix_cal_node) and nodes[name].no_derived():
@@ -353,6 +357,7 @@ class Reader(BaseReader):
                         self.logger.debug("calc subtree with no fix_cal_node root found: {}".format(name))
                         return False
             if name in context_value_dic and nodes[name].no_derived() and nodes[name].no_derive() \
+                and nodes[name].derivation_order <= nodes[possibly_root].derivation_order \
                 and not nodes[name].is_subtotal_fewer_or_extra_child(): # check 9064:2013-04-30
                 orphans.append(name)
                 if len(orphans) > 1:
@@ -433,13 +438,19 @@ class Reader(BaseReader):
 
     def fix_missing_calc_link(self, nodes:dict[str,Node], fix_cal_node:list[str], current_vdic:dict[str,ElementValue]):
         def make_missing_link(derived, orphans):
+            def orphans_are_same_fixcal(derived, orphans) -> bool:
+                if all([nmmatch(o.name, fix_cal_node) for o in orphans]):
+                    derived_t = t(derived.name)
+                    return all([t(o.name).startswith(derived_t) for o in orphans])
+                return False
             def orphans_has_derivelink_to_derived(derived, orphans):
                 if nmmatch(derived.name, fix_cal_node):
+                    if orphans_are_same_fixcal(derived, orphans):
+                        return True
                     first_fix_cal_node = next((o for o in orphans if nmmatch(o.name, fix_cal_node)), None)
                     return first_fix_cal_node is not None and derived in first_fix_cal_node.get_derive_chain()
-                else:
-                    return nmmatch(orphans[0].name, fix_cal_node)
-                
+                return nmmatch(orphans[0].name, fix_cal_node)
+
             if derived is None or not orphans:
                 return
             derived_value, diff, epsilon = derived.cvalue(current_vdic, lambda x: epsval(self.epsilon_value, x))
@@ -942,7 +953,7 @@ class Node():
     
     def validate(self, current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]) -> bool:
         value, diff, epsilon = self.cvalue(current_vdic, epsval)
-        return abs(diff) < epsilon
+        return abs(diff) < epsilon if not math.isnan(diff) else True
     
     def validate_or_remove_derive_children(self, current_vdic:dict[str, ElementValue], epsval:Callable[[list[float]],int]):
         removed = []
