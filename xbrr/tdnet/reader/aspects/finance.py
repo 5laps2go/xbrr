@@ -237,7 +237,7 @@ class Finance(BaseParser):
                    '<OperatingIncome','OperatingProfitLossIFRS','~(?<!Non)(?<!Other)OperatingIncome','NormalizedOperatingProfitIFRS',
                    'OrdinaryIncome','OrdinaryIncomeBNK','>OrdinaryProfitLoss','~(Operating|Ordinary)[Ll]oss$',
                    'ProfitLossBeforeTax','ProfitLossBeforeTaxIFRS','IncomeBeforeIncomeTaxes',  # 2282:2022-05-10
-                   'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$', 'ProfitLoss'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14
+                   'BusinessProfitLossIFRS','BusinessProfitPLIFRS','~Profit$', 'ProfitLoss', 'NetIncome'] # BusinessProfitPLIFRS 7951:2019-08-01, ~[Ll]oss$: 6084:2014-08-14, NetIncome 8070:2014-07-31
 
         role_uri = self.find_role_name('pl', latest2year, exclusion=self._Quarter_period_role_piece)
         if not role_uri:
