@@ -155,7 +155,22 @@ class Finance(BaseParser):
             
             # データ行の処理
             for row in rows[2:]:
-                cols = [td.get_text(strip=True) for td in row.find_all(['td', 'th'])]
+                def is_border_active(td:Tag, property_pattern):
+                    if not (style_str:=td.get('style')):
+                        return False
+                    match = re.search(fr'(?:{property_pattern})\s*:\s*([^;]+)', style_str.lower())
+                    if match:
+                        val = match.group(1).strip()
+                        return not bool(re.match(r'^(0+(?![1-9])(px|em|rem|pt|%)?|none|hidden)\b', val))
+                    return False
+                def has_left_border(td:Tag) -> bool:
+                    if is_border_active(td, 'border-left(?:-width)?|border'):
+                        return True
+                    if td.previous_sibling and is_border_active(td.previous_sibling, 'border-right(?:-width)?|border'):
+                        return True
+                    return False
+
+                cols = [td.get_text(strip=True) for td in row.find_all(['td', 'th']) if has_left_border(td)]
                 
                 # 横並びの列数が十分にない場合はスキップまたは特殊処理
                 if len(cols) < 6:
